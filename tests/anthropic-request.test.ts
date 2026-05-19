@@ -1,8 +1,9 @@
 import { describe, test, expect } from "bun:test"
 import { z } from "zod"
 
-import { state } from "~/lib/state"
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
+
+import { state } from "~/lib/state"
 import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
 
 // Zod schema for a single message in the chat completion request.
@@ -63,7 +64,7 @@ function isValidChatCompletionRequest(payload: unknown): boolean {
   return result.success
 }
 
-describe("Anthropic to OpenAI translation logic", () => {
+describe("Anthropic to OpenAI model translation", () => {
   test("should map dated Claude 3.5 Sonnet aliases to an available Copilot model", () => {
     state.models = {
       object: "list",
@@ -133,7 +134,9 @@ describe("Anthropic to OpenAI translation logic", () => {
 
     expect(openAIPayload.model).toBe("claude-sonnet-4")
   })
+})
 
+describe("Anthropic to OpenAI payload translation", () => {
   test("should translate minimal Anthropic payload to valid OpenAI payload", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "gpt-4o",
