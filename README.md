@@ -52,24 +52,24 @@ https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
 
 ## Installation
 
-Use `npx` to run the published npm package without a global install. The source is hosted at `https://github.com/maomaoGod/copilot-api`, but `npx copilot-api` requires the package to be published to npm or another npm-compatible registry.
+Use `npx` to run the published npm package without a global install. The source is hosted at `https://github.com/maomaoGod/copilot-api`, and the package is published under the `@maomaogod` npm scope.
 
 macOS/Linux:
 
 ```sh
-npx copilot-api start
+npx @maomaogod/copilot-api start
 ```
 
 Windows PowerShell:
 
 ```powershell
-npx copilot-api start
+npx @maomaogod/copilot-api start
 ```
 
 Windows CMD:
 
 ```bat
-npx copilot-api start
+npx @maomaogod/copilot-api start
 ```
 
 For local development, install dependencies with Bun:
@@ -142,25 +142,25 @@ The Docker image includes:
 Run the project directly from the Voyah Git repository:
 
 ```sh
-npx copilot-api start
+npx @maomaogod/copilot-api start
 ```
 
 With options:
 
 ```sh
-npx copilot-api start --port 8080
+npx @maomaogod/copilot-api start --port 8080
 ```
 
 For authentication only:
 
 ```sh
-npx copilot-api auth
+npx @maomaogod/copilot-api auth
 ```
 
 After global installation, you can also use the `copilot-api` command:
 
 ```sh
-npm install -g copilot-api
+npm install -g @maomaogod/copilot-api
 copilot-api start
 ```
 
@@ -242,46 +242,46 @@ Using with npx:
 
 ```sh
 # Basic usage with start command
-npx copilot-api start
+npx @maomaogod/copilot-api start
 
 # Run on custom port with verbose logging
-npx copilot-api start --port 8080 --verbose
+npx @maomaogod/copilot-api start --port 8080 --verbose
 
 # Use with a business plan GitHub account
-npx copilot-api start --account-type business
+npx @maomaogod/copilot-api start --account-type business
 
 # Use with an enterprise plan GitHub account
-npx copilot-api start --account-type enterprise
+npx @maomaogod/copilot-api start --account-type enterprise
 
 # Enable manual approval for each request
-npx copilot-api start --manual
+npx @maomaogod/copilot-api start --manual
 
 # Set rate limit to 30 seconds between requests
-npx copilot-api start --rate-limit 30
+npx @maomaogod/copilot-api start --rate-limit 30
 
 # Wait instead of error when rate limit is hit
-npx copilot-api start --rate-limit 30 --wait
+npx @maomaogod/copilot-api start --rate-limit 30 --wait
 
 # Run the auth flow instead of passing tokens on the command line
-npx copilot-api auth
+npx @maomaogod/copilot-api auth
 
 # Run only the auth flow
-npx copilot-api auth
+npx @maomaogod/copilot-api auth
 
 # Run auth flow with verbose logging
-npx copilot-api auth --verbose
+npx @maomaogod/copilot-api auth --verbose
 
 # Show your Copilot usage/quota in the terminal (no server needed)
-npx copilot-api check-usage
+npx @maomaogod/copilot-api check-usage
 
 # Display debug information for troubleshooting
-npx copilot-api debug
+npx @maomaogod/copilot-api debug
 
 # Display debug information in JSON format
-npx copilot-api debug --json
+npx @maomaogod/copilot-api debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
-npx copilot-api start --proxy-env
+npx @maomaogod/copilot-api start --proxy-env
 ```
 
 ## Using the Usage Viewer
@@ -290,7 +290,7 @@ After starting the server, a local usage endpoint will be displayed in your cons
 
 1.  Start the server. For example, using npx:
     ```sh
-    npx copilot-api start
+    npx @maomaogod/copilot-api start
     ```
 2.  The server will output `http://localhost:4141/usage`. Open that endpoint directly or configure a trusted dashboard to read it.
 
@@ -313,7 +313,7 @@ There are two ways to configure Claude Code to use this proxy:
 To get started, run the `start` command with the `--claude-code` flag:
 
 ```sh
-npx copilot-api start --claude-code
+npx @maomaogod/copilot-api start --claude-code
 ```
 
 You will be prompted to select a primary model and a "small, fast" model for background tasks. After selecting the models, a command will be copied to your clipboard. This command sets the necessary environment variables for Claude Code to use the proxy.
