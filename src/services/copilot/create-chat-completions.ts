@@ -1,18 +1,17 @@
 import consola from "consola"
-import { events } from "fetch-event-stream"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
-const GPT_5_4_MODEL_PATTERN = /(^|[^a-z0-9])gpt[-_.]?5[-_.]?4(?:$|[^a-z0-9])/i
+const GPT_5_MODEL_PATTERN = /(^|[^a-z0-9])gpt[-_.]?5(?:$|[^a-z0-9])/i
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const normalizedPayload = normalizeChatCompletionsPayload(payload)
+  const normalizedPayload = normalizeCompletionTokenParam(payload)
   consola.debug("Upstream token parameter routing:", {
     model: payload.model,
     inputMaxTokens: payload.max_tokens,
@@ -57,30 +56,44 @@ export const createChatCompletions = async (
   }
 
   if (normalizedPayload.stream) {
-    return events(response)
+    return response.body as ReadableStream
   }
 
   return (await response.json()) as ChatCompletionResponse
 }
 
-function normalizeChatCompletionsPayload(
+export function normalizeCompletionTokenParam(
   payload: ChatCompletionsPayload,
 ): ChatCompletionsPayload {
-  const resolvedMaxTokens = payload.max_tokens ?? payload.max_completion_tokens
-  const useMaxCompletionTokens = shouldUseMaxCompletionTokens(payload.model)
+  const normalizedPayload = { ...payload }
+  const resolvedMaxTokens =
+    normalizedPayload.max_tokens ?? normalizedPayload.max_completion_tokens
 
-  return {
-    ...payload,
-    max_tokens: useMaxCompletionTokens ? undefined : resolvedMaxTokens,
-    max_completion_tokens: useMaxCompletionTokens ? resolvedMaxTokens : undefined,
+  if (usesMaxCompletionTokens(normalizedPayload.model)) {
+    if (resolvedMaxTokens !== undefined) {
+      normalizedPayload.max_completion_tokens = resolvedMaxTokens
+    } else {
+      delete normalizedPayload.max_completion_tokens
+    }
+    delete normalizedPayload.max_tokens
+    return normalizedPayload
   }
+
+  if (resolvedMaxTokens !== undefined) {
+    normalizedPayload.max_tokens = resolvedMaxTokens
+  } else {
+    delete normalizedPayload.max_tokens
+  }
+  delete normalizedPayload.max_completion_tokens
+
+  return normalizedPayload
 }
 
-function shouldUseMaxCompletionTokens(modelId: string): boolean {
+export function usesMaxCompletionTokens(modelId: string): boolean {
   const resolvedModelId =
     state.models?.data.find((model) => model.id === modelId)?.id ?? modelId
 
-  return GPT_5_4_MODEL_PATTERN.test(resolvedModelId)
+  return GPT_5_MODEL_PATTERN.test(resolvedModelId)
 }
 
 // Streaming types
@@ -109,6 +122,8 @@ export interface ChatCompletionChunk {
 interface Delta {
   content?: string | null
   role?: "user" | "assistant" | "system" | "tool"
+  reasoning_text?: string | null
+  reasoning_opaque?: string | null
   tool_calls?: Array<{
     index: number
     id?: string

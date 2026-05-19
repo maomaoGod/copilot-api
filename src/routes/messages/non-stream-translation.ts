@@ -22,7 +22,7 @@ import {
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
 } from "./anthropic-types"
-import { mapOpenAIStopReasonToAnthropic } from "./utils"
+import { mapOpenAIStopReasonToAnthropic, resolveModelId } from "./utils"
 
 // Payload translation
 
@@ -32,7 +32,7 @@ export function translateToOpenAI(
   const maxTokens = payload.max_tokens ?? payload.max_completion_tokens
 
   return {
-    model: translateModelName(payload.model),
+    model: resolveModelId(payload.model),
     messages: translateAnthropicMessagesToOpenAI(
       payload.messages,
       payload.system,
@@ -46,16 +46,6 @@ export function translateToOpenAI(
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
   }
-}
-
-function translateModelName(model: string): string {
-  // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
-    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
-  } else if (model.startsWith("claude-opus-")) {
-    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
-  }
-  return model
 }
 
 function translateAnthropicMessagesToOpenAI(
