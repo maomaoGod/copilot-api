@@ -12,8 +12,13 @@ import { state } from "./state"
 
 const readGithubToken = () => fs.readFile(PATHS.GITHUB_TOKEN_PATH, "utf8")
 
-const writeGithubToken = (token: string) =>
-  fs.writeFile(PATHS.GITHUB_TOKEN_PATH, token)
+async function writeGithubToken(token: string): Promise<void> {
+  await fs.writeFile(PATHS.GITHUB_TOKEN_PATH, token, { mode: 0o600 })
+
+  if (process.platform !== "win32") {
+    await fs.chmod(PATHS.GITHUB_TOKEN_PATH, 0o600)
+  }
+}
 
 export const setupCopilotToken = async () => {
   const { token, refresh_in } = await getCopilotToken()

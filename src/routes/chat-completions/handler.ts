@@ -44,15 +44,19 @@ export async function handleCompletion(c: Context) {
 
   if (state.manualApprove) await awaitApproval()
 
-  const resolvedMaxTokens =
-    !isNullish(payload.max_tokens) ?
-      payload.max_tokens
-    : !isNullish(payload.max_completion_tokens) ?
-      payload.max_completion_tokens
-    : selectedModel?.capabilities.limits.max_output_tokens
+  const useMaxCompletionTokens = usesMaxCompletionTokens(payload.model)
+  let resolvedMaxTokens = selectedModel?.capabilities.limits.max_output_tokens
+
+  if (useMaxCompletionTokens && !isNullish(payload.max_completion_tokens)) {
+    resolvedMaxTokens = payload.max_completion_tokens
+  } else if (!isNullish(payload.max_tokens)) {
+    resolvedMaxTokens = payload.max_tokens
+  } else if (!isNullish(payload.max_completion_tokens)) {
+    resolvedMaxTokens = payload.max_completion_tokens
+  }
 
   payload =
-    usesMaxCompletionTokens(payload.model) ?
+    useMaxCompletionTokens ?
       {
         ...payload,
         max_tokens: undefined,
@@ -64,10 +68,7 @@ export async function handleCompletion(c: Context) {
         max_completion_tokens: undefined,
       }
 
-  consola.debug(
-    "Set output token limit to:",
-    JSON.stringify(resolvedMaxTokens),
-  )
+  consola.debug("Set output token limit to:", JSON.stringify(resolvedMaxTokens))
   consola.debug(
     "Set max_completion_tokens to:",
     JSON.stringify(payload.max_completion_tokens),

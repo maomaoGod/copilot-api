@@ -4,7 +4,7 @@ import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
-const GPT_5_MODEL_PATTERN = /(^|[^a-z0-9])gpt[-_.]?5(?:$|[^a-z0-9])/i
+const GPT_5_MODEL_PATTERN = /(?:^|[^a-z0-9])gpt[-_.]?5(?:$|[^a-z0-9])/i
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
@@ -12,16 +12,18 @@ export const createChatCompletions = async (
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
   const normalizedPayload = normalizeCompletionTokenParam(payload)
+  let upstreamTokenField: "max_completion_tokens" | "max_tokens" | null = null
+  if (normalizedPayload.max_completion_tokens !== undefined) {
+    upstreamTokenField = "max_completion_tokens"
+  } else if (normalizedPayload.max_tokens !== undefined) {
+    upstreamTokenField = "max_tokens"
+  }
+
   consola.debug("Upstream token parameter routing:", {
     model: payload.model,
     inputMaxTokens: payload.max_tokens,
     inputMaxCompletionTokens: payload.max_completion_tokens,
-    upstreamTokenField:
-      normalizedPayload.max_completion_tokens !== undefined ?
-        "max_completion_tokens"
-      : normalizedPayload.max_tokens !== undefined ?
-          "max_tokens"
-        : null,
+    upstreamTokenField,
     upstreamMaxTokens: normalizedPayload.max_tokens,
     upstreamMaxCompletionTokens: normalizedPayload.max_completion_tokens,
   })
@@ -66,10 +68,11 @@ export function normalizeCompletionTokenParam(
   payload: ChatCompletionsPayload,
 ): ChatCompletionsPayload {
   const normalizedPayload = { ...payload }
-  const resolvedMaxTokens =
-    normalizedPayload.max_tokens ?? normalizedPayload.max_completion_tokens
 
   if (usesMaxCompletionTokens(normalizedPayload.model)) {
+    const resolvedMaxTokens =
+      normalizedPayload.max_completion_tokens ?? normalizedPayload.max_tokens
+
     if (resolvedMaxTokens !== undefined) {
       normalizedPayload.max_completion_tokens = resolvedMaxTokens
     } else {
@@ -78,6 +81,9 @@ export function normalizeCompletionTokenParam(
     delete normalizedPayload.max_tokens
     return normalizedPayload
   }
+
+  const resolvedMaxTokens =
+    normalizedPayload.max_tokens ?? normalizedPayload.max_completion_tokens
 
   if (resolvedMaxTokens !== undefined) {
     normalizedPayload.max_tokens = resolvedMaxTokens

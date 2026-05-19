@@ -46,12 +46,33 @@ https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
 
 ## Prerequisites
 
-- Bun (>= 1.2.x)
+- Node.js 20 or newer for `npx` usage
 - GitHub account with Copilot subscription (individual, business, or enterprise)
+- Bun (>= 1.2.x) only when developing from source
 
 ## Installation
 
-To install dependencies, run:
+Use `npx` to run the published npm package without a global install. The source is hosted at `https://github.com/maomaoGod/copilot-api`, but `npx copilot-api` requires the package to be published to npm or another npm-compatible registry.
+
+macOS/Linux:
+
+```sh
+npx copilot-api start
+```
+
+Windows PowerShell:
+
+```powershell
+npx copilot-api start
+```
+
+Windows CMD:
+
+```bat
+npx copilot-api start
+```
+
+For local development, install dependencies with Bun:
 
 ```sh
 bun install
@@ -118,22 +139,29 @@ The Docker image includes:
 
 ## Using with npx
 
-You can run the project directly using npx:
+Run the project directly from the Voyah Git repository:
 
 ```sh
-npx copilot-api@latest start
+npx copilot-api start
 ```
 
 With options:
 
 ```sh
-npx copilot-api@latest start --port 8080
+npx copilot-api start --port 8080
 ```
 
 For authentication only:
 
 ```sh
-npx copilot-api@latest auth
+npx copilot-api auth
+```
+
+After global installation, you can also use the `copilot-api` command:
+
+```sh
+npm install -g copilot-api
+copilot-api start
 ```
 
 ## Command Structure
@@ -159,7 +187,7 @@ The following command line options are available for the `start` command:
 | --manual       | Enable manual request approval                                                | false      | none  |
 | --rate-limit   | Rate limit in seconds between requests                                        | none       | -r    |
 | --wait         | Wait instead of error when rate limit is hit                                  | false      | -w    |
-| --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
+| --github-token | Provide GitHub token directly as a last resort; prefer `auth` because command-line tokens can be exposed in shell history and process lists | none       | -g    |
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
@@ -207,7 +235,6 @@ New endpoints for monitoring your Copilot usage and quotas.
 | Endpoint     | Method | Description                                                  |
 | ------------ | ------ | ------------------------------------------------------------ |
 | `GET /usage` | `GET`  | Get detailed Copilot usage statistics and quota information. |
-| `GET /token` | `GET`  | Get the current Copilot token being used by the API.         |
 
 ## Example Usage
 
@@ -215,59 +242,57 @@ Using with npx:
 
 ```sh
 # Basic usage with start command
-npx copilot-api@latest start
+npx copilot-api start
 
 # Run on custom port with verbose logging
-npx copilot-api@latest start --port 8080 --verbose
+npx copilot-api start --port 8080 --verbose
 
 # Use with a business plan GitHub account
-npx copilot-api@latest start --account-type business
+npx copilot-api start --account-type business
 
 # Use with an enterprise plan GitHub account
-npx copilot-api@latest start --account-type enterprise
+npx copilot-api start --account-type enterprise
 
 # Enable manual approval for each request
-npx copilot-api@latest start --manual
+npx copilot-api start --manual
 
 # Set rate limit to 30 seconds between requests
-npx copilot-api@latest start --rate-limit 30
+npx copilot-api start --rate-limit 30
 
 # Wait instead of error when rate limit is hit
-npx copilot-api@latest start --rate-limit 30 --wait
+npx copilot-api start --rate-limit 30 --wait
 
-# Provide GitHub token directly
-npx copilot-api@latest start --github-token ghp_YOUR_TOKEN_HERE
+# Run the auth flow instead of passing tokens on the command line
+npx copilot-api auth
 
 # Run only the auth flow
-npx copilot-api@latest auth
+npx copilot-api auth
 
 # Run auth flow with verbose logging
-npx copilot-api@latest auth --verbose
+npx copilot-api auth --verbose
 
 # Show your Copilot usage/quota in the terminal (no server needed)
-npx copilot-api@latest check-usage
+npx copilot-api check-usage
 
 # Display debug information for troubleshooting
-npx copilot-api@latest debug
+npx copilot-api debug
 
 # Display debug information in JSON format
-npx copilot-api@latest debug --json
+npx copilot-api debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
-npx copilot-api@latest start --proxy-env
+npx copilot-api start --proxy-env
 ```
 
 ## Using the Usage Viewer
 
-After starting the server, a URL to the Copilot Usage Dashboard will be displayed in your console. This dashboard is a web interface for monitoring your API usage.
+After starting the server, a local usage endpoint will be displayed in your console. You can query this endpoint directly or point a trusted local dashboard at it.
 
 1.  Start the server. For example, using npx:
     ```sh
-    npx copilot-api@latest start
+    npx copilot-api start
     ```
-2.  The server will output a URL to the usage viewer. Copy and paste this URL into your browser. It will look something like this:
-    `https://ericc-ch.github.io/copilot-api?endpoint=http://localhost:4141/usage`
-    - If you use the `start.bat` script on Windows, this page will open automatically.
+2.  The server will output `http://localhost:4141/usage`. Open that endpoint directly or configure a trusted dashboard to read it.
 
 The dashboard provides a user-friendly interface to view your Copilot usage data:
 
@@ -275,8 +300,7 @@ The dashboard provides a user-friendly interface to view your Copilot usage data
 - **Fetch Data**: Click the "Fetch" button to load or refresh the usage data. The dashboard will automatically fetch data on load.
 - **Usage Quotas**: View a summary of your usage quotas for different services like Chat and Completions, displayed with progress bars for a quick overview.
 - **Detailed Information**: See the full JSON response from the API for a detailed breakdown of all available usage statistics.
-- **URL-based Configuration**: You can also specify the API endpoint directly in the URL using a query parameter. This is useful for bookmarks or sharing links. For example:
-  `https://ericc-ch.github.io/copilot-api?endpoint=http://your-api-server/usage`
+- **URL-based Configuration**: You can also specify the API endpoint directly in the URL using an `endpoint` query parameter. This is useful for bookmarks or sharing links.
 
 ## Using with Claude Code
 
@@ -289,7 +313,7 @@ There are two ways to configure Claude Code to use this proxy:
 To get started, run the `start` command with the `--claude-code` flag:
 
 ```sh
-npx copilot-api@latest start --claude-code
+npx copilot-api start --claude-code
 ```
 
 You will be prompted to select a primary model and a "small, fast" model for background tasks. After selecting the models, a command will be copied to your clipboard. This command sets the necessary environment variables for Claude Code to use the proxy.

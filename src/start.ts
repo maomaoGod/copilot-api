@@ -110,14 +110,12 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     }
   }
 
-  consola.box(
-    `🌐 Usage Viewer: https://ericc-ch.github.io/copilot-api?endpoint=${serverUrl}/usage`,
-  )
+  consola.box(`Usage endpoint: ${serverUrl}/usage`)
 
   serve({
     fetch: server.fetch as ServerHandler,
+    hostname: "127.0.0.1",
     port: options.port,
-    idleTimeout: 0,
   })
 }
 
