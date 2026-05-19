@@ -16,7 +16,7 @@
   "author": "Erick Christian <erickchristian48@gmail.com>",
   "type": "module",
   "bin": {
-    "copilot-api": "./dist/main.js"
+    "copilot-api": "dist/main.js"
   },
   "files": [
     "dist"
