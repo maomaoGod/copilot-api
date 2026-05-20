@@ -1,15 +1,38 @@
 import consola from "consola"
 
-import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
+import { createChatCompletionStreamFromResponse } from "~/bridges/claude/web-search"
+import {
+  buildFinalPayloadWithWebSearchContext,
+  createCodexNativeWebSearchDecisionPayload,
+  createCodexWebSearchExecution,
+  hasCodexNativeWebSearch,
+  isCodexNativeWebSearchRequested,
+  mergeWebSearchIntoChatCompletion,
+} from "~/bridges/codex/web-search"
+import { copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { fetchWithRetry } from "~/lib/fetch"
+import { getModelCapability } from "~/lib/model-capabilities"
 import { state } from "~/lib/state"
 
-const GPT_5_MODEL_PATTERN = /(?:^|[^a-z0-9])gpt[-_.]?5(?:$|[^a-z0-9])/i
+import {
+  buildCopilotHeaders,
+  createResponses,
+  shouldRetryWithResponses,
+  shouldUseResponsesApiForModel,
+} from "./responses"
+
+const GPT_5_MODEL_PATTERN =
+  /(?:^|[^a-z0-9])gpt[-_.]?5(?:[-_.][a-z0-9]+)*(?:$|[^a-z0-9])/i
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
+
+  if (hasCodexNativeWebSearch(payload)) {
+    return await createChatCompletionWithWebSearch(payload)
+  }
 
   const normalizedPayload = normalizeCompletionTokenParam(payload)
   let upstreamTokenField: "max_completion_tokens" | "max_tokens" | null = null
@@ -40,25 +63,133 @@ export const createChatCompletions = async (
     ["assistant", "tool"].includes(msg.role),
   )
 
-  // Build headers and add X-Initiator
-  const headers: Record<string, string> = {
-    ...copilotHeaders(state, enableVision),
-    "X-Initiator": isAgentCall ? "agent" : "user",
+  const initiator = isAgentCall ? "agent" : "user"
+  const headers = buildCopilotHeaders(enableVision, initiator)
+
+  if (shouldUseResponsesApiForModel(normalizedPayload.model)) {
+    return await createResponses(normalizedPayload, headers)
   }
 
-  const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(normalizedPayload),
-  })
+  const response = await fetchWithRetry(
+    `${copilotBaseUrl(state)}/chat/completions`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(normalizedPayload),
+    },
+  )
 
   if (!response.ok) {
+    if (
+      getModelCapability(normalizedPayload.model)?.fallback
+        !== "chat-completions"
+      && (await shouldRetryWithResponses(response))
+    ) {
+      return await createResponses(normalizedPayload, headers)
+    }
+
     consola.error("Failed to create chat completions", response)
     throw new HTTPError("Failed to create chat completions", response)
   }
 
   if (normalizedPayload.stream) {
     return response.body as ReadableStream
+  }
+
+  return (await response.json()) as ChatCompletionResponse
+}
+
+async function createChatCompletionWithWebSearch(
+  payload: ChatCompletionsPayload,
+): Promise<ChatCompletionResponse | ReadableStream<Uint8Array>> {
+  const decisionPayload = createCodexNativeWebSearchDecisionPayload(payload)
+  const decisionResponse =
+    await createChatCompletionsWithoutWebSearch(decisionPayload)
+
+  if (
+    !isCodexNativeWebSearchRequested(payload)
+    && !decisionResponse.choices[0]?.message.tool_calls?.some(
+      (toolCall) => toolCall.function.name === "web_search",
+    )
+  ) {
+    return payload.stream ?
+        createChatCompletionStreamFromResponse(decisionResponse)
+      : decisionResponse
+  }
+
+  const search = await createCodexWebSearchExecution(payload)
+  const finalPayload = buildFinalPayloadWithWebSearchContext(payload, search)
+  const finalResponse =
+    await createChatCompletionsWithoutWebSearch(finalPayload)
+  const mergedResponse = mergeWebSearchIntoChatCompletion(finalResponse, search)
+  return payload.stream ?
+      createChatCompletionStreamFromResponse(mergedResponse)
+    : mergedResponse
+}
+
+async function createChatCompletionsWithoutWebSearch(
+  payload: ChatCompletionsPayload,
+): Promise<ChatCompletionResponse> {
+  const normalizedPayload = normalizeCompletionTokenParam(payload)
+  let upstreamTokenField: "max_completion_tokens" | "max_tokens" | null = null
+  if (normalizedPayload.max_completion_tokens !== undefined) {
+    upstreamTokenField = "max_completion_tokens"
+  } else if (normalizedPayload.max_tokens !== undefined) {
+    upstreamTokenField = "max_tokens"
+  }
+
+  consola.debug("Upstream token parameter routing:", {
+    model: payload.model,
+    inputMaxTokens: payload.max_tokens,
+    inputMaxCompletionTokens: payload.max_completion_tokens,
+    upstreamTokenField,
+    upstreamMaxTokens: normalizedPayload.max_tokens,
+    upstreamMaxCompletionTokens: normalizedPayload.max_completion_tokens,
+  })
+
+  const enableVision = normalizedPayload.messages.some(
+    (x) =>
+      typeof x.content !== "string"
+      && x.content?.some((x) => x.type === "image_url"),
+  )
+
+  const isAgentCall = normalizedPayload.messages.some((msg) =>
+    ["assistant", "tool"].includes(msg.role),
+  )
+
+  const initiator = isAgentCall ? "agent" : "user"
+  const headers = buildCopilotHeaders(enableVision, initiator)
+
+  if (shouldUseResponsesApiForModel(normalizedPayload.model)) {
+    return (await createResponses(
+      normalizedPayload,
+      headers,
+    )) as ChatCompletionResponse
+  }
+
+  const response = await fetchWithRetry(
+    `${copilotBaseUrl(state)}/chat/completions`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(normalizedPayload),
+    },
+  )
+
+  if (!response.ok) {
+    if (
+      getModelCapability(normalizedPayload.model)?.fallback
+        !== "chat-completions"
+      && (await shouldRetryWithResponses(response))
+    ) {
+      return (await createResponses(
+        normalizedPayload,
+        headers,
+      )) as ChatCompletionResponse
+    }
+
+    consola.error("Failed to create chat completions", response)
+    throw new HTTPError("Failed to create chat completions", response)
   }
 
   return (await response.json()) as ChatCompletionResponse
@@ -205,17 +336,25 @@ export interface ChatCompletionsPayload {
     | "auto"
     | "required"
     | { type: "function"; function: { name: string } }
+    | { type: "web_search" }
+    | { type: "web_search_preview" }
     | null
   user?: string | null
 }
 
-export interface Tool {
+export type Tool = FunctionTool | WebSearchTool
+
+export interface FunctionTool {
   type: "function"
   function: {
     name: string
     description?: string
     parameters: Record<string, unknown>
   }
+}
+
+export interface WebSearchTool {
+  type: "web_search" | "web_search_preview"
 }
 
 export interface Message {

@@ -1,3 +1,4 @@
+import { isAnthropicNativeWebSearchTool } from "~/bridges/claude/web-search"
 import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
@@ -11,6 +12,7 @@ import {
 import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
+  type AnthropicFunctionTool,
   type AnthropicMessage,
   type AnthropicMessagesPayload,
   type AnthropicResponse,
@@ -30,6 +32,7 @@ export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
 ): ChatCompletionsPayload {
   const maxTokens = payload.max_tokens
+  const tools = translateAnthropicToolsToOpenAI(payload.tools)
 
   return {
     model: resolveModelId(payload.model),
@@ -43,8 +46,11 @@ export function translateToOpenAI(
     temperature: payload.temperature,
     top_p: payload.top_p,
     user: payload.metadata?.user_id,
-    tools: translateAnthropicToolsToOpenAI(payload.tools),
-    tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
+    tools,
+    tool_choice: translateAnthropicToolChoiceToOpenAI(
+      payload.tool_choice,
+      tools,
+    ),
   }
 }
 
@@ -226,18 +232,48 @@ function translateAnthropicToolsToOpenAI(
   if (!anthropicTools) {
     return undefined
   }
-  return anthropicTools.map((tool) => ({
+
+  return anthropicTools.flatMap((tool) => {
+    if (isAnthropicNativeWebSearchTool(tool)) {
+      return [{ type: "web_search" }]
+    }
+
+    if (isAnthropicFunctionTool(tool)) {
+      return [createOpenAIFunctionTool(tool)]
+    }
+
+    return []
+  })
+}
+
+function isAnthropicFunctionTool(
+  tool: AnthropicTool,
+): tool is AnthropicFunctionTool {
+  return !isAnthropicNativeWebSearchTool(tool)
+}
+
+function createOpenAIFunctionTool(tool: AnthropicFunctionTool): Tool {
+  return {
     type: "function",
     function: {
       name: tool.name,
       description: tool.description,
       parameters: tool.input_schema,
     },
-  }))
+  }
+}
+
+function hasOnlyWebSearchTools(tools: Array<Tool> | undefined): boolean {
+  if (!tools?.length) {
+    return false
+  }
+
+  return tools.every((tool) => tool.type === "web_search")
 }
 
 function translateAnthropicToolChoiceToOpenAI(
   anthropicToolChoice: AnthropicMessagesPayload["tool_choice"],
+  tools: Array<Tool> | undefined,
 ): ChatCompletionsPayload["tool_choice"] {
   if (!anthropicToolChoice) {
     return undefined
@@ -248,9 +284,12 @@ function translateAnthropicToolChoiceToOpenAI(
       return "auto"
     }
     case "any": {
-      return "required"
+      return hasOnlyWebSearchTools(tools) ? { type: "web_search" } : "required"
     }
     case "tool": {
+      if (anthropicToolChoice.name === "web_search") {
+        return hasOnlyWebSearchTools(tools) ? { type: "web_search" } : undefined
+      }
       if (anthropicToolChoice.name) {
         return {
           type: "function",

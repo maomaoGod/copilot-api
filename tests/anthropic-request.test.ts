@@ -231,7 +231,9 @@ describe("Anthropic to OpenAI payload translation", () => {
     // Should fail validation
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(false)
   })
+})
 
+describe("Anthropic thinking block translation", () => {
   test("should handle thinking blocks in assistant messages", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "claude-3-5-sonnet-20241022",
@@ -303,6 +305,92 @@ describe("Anthropic to OpenAI payload translation", () => {
     )
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
+  })
+})
+
+describe("Anthropic web search translation", () => {
+  test("should translate Anthropic web search tool to OpenAI web_search tool", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4.6",
+      messages: [
+        { role: "user", content: "Search the web for Bun release notes" },
+      ],
+      max_tokens: 128,
+      tools: [
+        {
+          type: "web_search_20250305",
+        },
+      ],
+      tool_choice: { type: "tool", name: "web_search" },
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.tools).toEqual([{ type: "web_search" }])
+    expect(openAIPayload.tool_choice).toEqual({ type: "web_search" })
+  })
+
+  test("should translate Anthropic any tool choice to hosted web_search when only web search tools exist", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4.6",
+      messages: [
+        { role: "user", content: "Search the web for Bun release notes" },
+      ],
+      max_tokens: 128,
+      tools: [
+        {
+          type: "web_search_20250305",
+        },
+      ],
+      tool_choice: { type: "any" },
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.tools).toEqual([{ type: "web_search" }])
+    expect(openAIPayload.tool_choice).toEqual({ type: "web_search" })
+  })
+
+  test("should not force hosted web_search when Anthropic web_search tool is absent", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4.6",
+      messages: [
+        { role: "user", content: "Search the web for Bun release notes" },
+      ],
+      max_tokens: 128,
+      tools: [
+        {
+          name: "lookup_docs",
+          description: "Look up docs",
+          input_schema: {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+            },
+          },
+        },
+      ],
+      tool_choice: { type: "tool", name: "web_search" },
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.tools).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "lookup_docs",
+          description: "Look up docs",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+            },
+          },
+        },
+      },
+    ])
+    expect(openAIPayload.tool_choice).toBeUndefined()
   })
 })
 

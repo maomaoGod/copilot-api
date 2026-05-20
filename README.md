@@ -228,6 +228,62 @@ These endpoints are designed to be compatible with the Anthropic Messages API.
 | `POST /v1/messages`              | `POST` | Creates a model response for a given conversation.           |
 | `POST /v1/messages/count_tokens` | `POST` | Calculates the number of tokens for a given set of messages. |
 
+### Web Search
+
+The proxy supports bridge-style web search orchestration for non-streaming requests.
+When a request includes native hosted web search tools, the proxy can:
+
+1. ask the model whether web search is needed
+2. execute the configured search backend
+3. inject the retrieved results as trusted context
+4. ask the model for the final answer
+
+Current status:
+
+- OpenAI-compatible `web_search` and `web_search_preview` are supported for chat completions
+- Anthropic `web_search_20250305` requests are translated into the same hosted web search flow
+- `stream: true` with native web search returns a buffered synthetic chat-completion stream after the search workflow finishes; it is not true incremental upstream streaming
+- `/responses` routing with image input is not supported yet when the request is converted to Responses API format
+
+#### `COPILOT_WEB_SEARCH_BACKEND`
+
+Set `COPILOT_WEB_SEARCH_BACKEND` to choose how the search step is executed:
+
+- `searxng`: query a local or self-hosted SearXNG instance at `http://localhost:8080`
+- `copilot-cli`: use the local `copilot chat --json` command as the search executor
+- `copilot-http:<model>`: execute search through `/responses` with `web_search_preview` using the specified Copilot model
+
+If this variable is unset or malformed, native web search requests will fail because no search backend is configured.
+
+#### Smoke test
+
+Example OpenAI-compatible non-streaming smoke test:
+
+```sh
+curl http://127.0.0.1:4141/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [{"role": "user", "content": "Search the web for the latest Bun release notes and summarize them in one sentence."}],
+    "tools": [{"type": "web_search_preview"}]
+  }'
+```
+
+Example Anthropic-compatible non-streaming smoke test:
+
+```sh
+curl http://127.0.0.1:4141/v1/messages \
+  -H 'Content-Type: application/json' \
+  -H 'x-api-key: dummy' \
+  -H 'anthropic-version: 2023-06-01' \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 256,
+    "messages": [{"role": "user", "content": "Search the web for the latest Bun release notes and summarize them in one sentence."}],
+    "tools": [{"type": "web_search_20250305"}]
+  }'
+```
+
 ### Usage Monitoring Endpoints
 
 New endpoints for monitoring your Copilot usage and quotas.

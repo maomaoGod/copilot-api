@@ -81,10 +81,18 @@ export interface AnthropicAssistantMessage {
 
 export type AnthropicMessage = AnthropicUserMessage | AnthropicAssistantMessage
 
-export interface AnthropicTool {
+export type AnthropicTool = AnthropicFunctionTool | AnthropicWebSearchTool
+
+export interface AnthropicFunctionTool {
   name: string
   description?: string
   input_schema: Record<string, unknown>
+}
+
+export interface AnthropicWebSearchTool {
+  type: "web_search_20250305"
+  name?: "web_search"
+  max_uses?: number
 }
 
 export interface AnthropicResponse {

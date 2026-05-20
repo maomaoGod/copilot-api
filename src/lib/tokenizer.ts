@@ -279,6 +279,10 @@ const calculateToolTokens = (
   encoder: Encoder,
   constants: ReturnType<typeof getModelConstants>,
 ): number => {
+  if (tool.type !== "function") {
+    return encoder.encode(tool.type).length
+  }
+
   let tokens = constants.funcInit
   const func = tool.function
   const fName = func.name
@@ -288,12 +292,7 @@ const calculateToolTokens = (
   }
   const line = fName + ":" + fDesc
   tokens += encoder.encode(line).length
-  if (
-    typeof func.parameters === "object" // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    && func.parameters !== null
-  ) {
-    tokens += calculateParametersTokens(func.parameters, encoder, constants)
-  }
+  tokens += calculateParametersTokens(func.parameters, encoder, constants)
   return tokens
 }
 
