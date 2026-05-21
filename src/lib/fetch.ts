@@ -15,8 +15,8 @@ function getRequestMethod(
   return "GET"
 }
 
-function shouldRetryMethod(method: string): boolean {
-  return method === "GET" || method === "HEAD"
+function shouldRetryMethod(_method: string): boolean {
+  return true
 }
 
 function isRetryableFetchError(error: unknown): boolean {

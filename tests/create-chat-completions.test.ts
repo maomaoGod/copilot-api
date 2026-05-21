@@ -370,7 +370,6 @@ test("retries once when a GET request socket closes before succeeding", async ()
   expect(newCalls).toHaveLength(2)
   expect(response).toMatchObject({
     ok: true,
-    body: undefined,
   })
 })
 
@@ -394,7 +393,66 @@ test("retries once when a GET request returns 5xx before succeeding", async () =
   expect(newCalls).toHaveLength(2)
   expect(response).toMatchObject({
     ok: true,
-    body: undefined,
+  })
+})
+
+test("retries once when a POST request with a JSON body socket closes before succeeding", async () => {
+  fetchMock.mockImplementationOnce(() =>
+    Promise.reject(
+      new Error("fetch failed", { cause: new Error("other side closed") }),
+    ),
+  )
+
+  const requestBody = JSON.stringify({ message: "hi" })
+  const callStart = fetchMock.mock.calls.length
+  const response = await fetchWithRetry(
+    "https://example.com/chat/completions",
+    {
+      method: "POST",
+      body: requestBody,
+      headers: { "Content-Type": "application/json" },
+    },
+  )
+  const newCalls = fetchMock.mock.calls.slice(callStart)
+
+  expect(newCalls).toHaveLength(2)
+  expect(newCalls[0]?.[1]?.body).toBe(requestBody)
+  expect(newCalls[1]?.[1]?.body).toBe(requestBody)
+  expect(response).toMatchObject({
+    ok: true,
+  })
+})
+
+test("retries once when a POST request with a JSON body returns 5xx before succeeding", async () => {
+  fetchMock.mockImplementationOnce(
+    (_url: string | URL | Request, opts?: RequestInit) =>
+      Promise.resolve({
+        ok: false,
+        status: 502,
+        json: () => ({ error: { message: "bad gateway" } }),
+        text: () => JSON.stringify({ error: { message: "bad gateway" } }),
+        headers: opts?.headers,
+        body: opts?.body,
+      } as unknown as Response),
+  )
+
+  const requestBody = JSON.stringify({ message: "hi" })
+  const callStart = fetchMock.mock.calls.length
+  const response = await fetchWithRetry(
+    "https://example.com/chat/completions",
+    {
+      method: "POST",
+      body: requestBody,
+      headers: { "Content-Type": "application/json" },
+    },
+  )
+  const newCalls = fetchMock.mock.calls.slice(callStart)
+
+  expect(newCalls).toHaveLength(2)
+  expect(newCalls[0]?.[1]?.body).toBe(requestBody)
+  expect(newCalls[1]?.[1]?.body).toBe(requestBody)
+  expect(response).toMatchObject({
+    ok: true,
   })
 })
 

@@ -34,6 +34,7 @@ export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   setRequestModel(c, anthropicPayload.model)
   consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
+  consola.debug("Anthropic stream mode:", anthropicPayload.stream ?? false)
 
   const openAIPayload = translateToOpenAI(anthropicPayload)
   setResolvedModel(c, openAIPayload.model)
@@ -63,6 +64,11 @@ export async function handleCompletion(c: Context) {
   }
 
   consola.debug("Streaming response from Copilot")
+  c.header("Content-Type", "text/event-stream")
+  c.header("Cache-Control", "no-cache")
+  c.header("Connection", "keep-alive")
+  c.header("X-Accel-Buffering", "no")
+
   return streamSSE(c, async (stream) => {
     const streamState: AnthropicStreamState = {
       messageStartSent: false,

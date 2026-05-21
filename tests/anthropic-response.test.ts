@@ -385,6 +385,74 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
     }
   })
 
+  test("should emit text deltas as separate stream events", () => {
+    const streamState = createDefaultStreamState()
+    const translatedStream = simpleTextStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+
+    expect(translatedStream).toEqual([
+      {
+        type: "message_start",
+        message: {
+          id: "cmpl-1",
+          type: "message",
+          role: "assistant",
+          content: [],
+          model: "gpt-4o-2024-05-13",
+          stop_reason: null,
+          stop_sequence: null,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+          },
+        },
+      },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: {
+          type: "text",
+          text: "",
+        },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: {
+          type: "text_delta",
+          text: "Hello",
+        },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: {
+          type: "text_delta",
+          text: " there",
+        },
+      },
+      {
+        type: "content_block_stop",
+        index: 0,
+      },
+      {
+        type: "message_delta",
+        delta: {
+          stop_reason: "end_turn",
+          stop_sequence: null,
+        },
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+      },
+      {
+        type: "message_stop",
+      },
+    ])
+  })
+
   test("should translate a stream with tool calls", () => {
     const streamState = createDefaultStreamState()
     const translatedStream = toolCallStream.flatMap((chunk) =>
