@@ -3,15 +3,10 @@
 export interface AnthropicMessagesPayload {
   model: string
   messages: Array<AnthropicMessage>
-  max_tokens: number
-  max_completion_tokens?: number
+  cache_control?: AnthropicCacheControl | null
   system?: string | Array<AnthropicTextBlock>
-  metadata?: {
-    user_id?: string
-  }
   stop_sequences?: Array<string>
   stream?: boolean
-  temperature?: number
   top_p?: number
   top_k?: number
   tools?: Array<AnthropicTool>
@@ -19,16 +14,33 @@ export interface AnthropicMessagesPayload {
     type: "auto" | "any" | "tool" | "none"
     name?: string
   }
+  max_tokens: number
   thinking?: {
-    type: "enabled"
+    type: "enabled" | "adaptive"
     budget_tokens?: number
+    display?: string
   }
   service_tier?: "auto" | "standard_only"
+  output_config?: {
+    effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  }
+  metadata?: {
+    user_id?: string
+  }
+  temperature?: number
+}
+
+export interface AnthropicCacheControl {
+  type: "ephemeral"
+  ttl?: "5m" | "1h"
+  scope?: string
+  [key: string]: unknown
 }
 
 export interface AnthropicTextBlock {
   type: "text"
   text: string
+  cache_control?: AnthropicCacheControl | null
 }
 
 export interface AnthropicImageBlock {
@@ -38,13 +50,38 @@ export interface AnthropicImageBlock {
     media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp"
     data: string
   }
+  cache_control?: AnthropicCacheControl | null
 }
+
+export interface AnthropicDocumentBlock {
+  type: "document"
+  source: {
+    type: "base64"
+    media_type: "application/pdf"
+    data: string
+  }
+  title?: string | null
+  cache_control?: AnthropicCacheControl | null
+}
+
+export interface AnthropicToolReferenceBlock {
+  type: "tool_reference"
+  tool_name: string
+  cache_control?: AnthropicCacheControl | null
+}
+
+export type AnthropicToolResultContentBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | AnthropicDocumentBlock
+  | AnthropicToolReferenceBlock
 
 export interface AnthropicToolResultBlock {
   type: "tool_result"
   tool_use_id: string
-  content: string
+  content: string | Array<AnthropicToolResultContentBlock>
   is_error?: boolean
+  cache_control?: AnthropicCacheControl | null
 }
 
 export interface AnthropicToolUseBlock {
@@ -52,16 +89,19 @@ export interface AnthropicToolUseBlock {
   id: string
   name: string
   input: Record<string, unknown>
+  cache_control?: AnthropicCacheControl | null
 }
 
 export interface AnthropicThinkingBlock {
   type: "thinking"
   thinking: string
+  signature: string
 }
 
 export type AnthropicUserContentBlock =
   | AnthropicTextBlock
   | AnthropicImageBlock
+  | AnthropicDocumentBlock
   | AnthropicToolResultBlock
 
 export type AnthropicAssistantContentBlock =
@@ -81,18 +121,12 @@ export interface AnthropicAssistantMessage {
 
 export type AnthropicMessage = AnthropicUserMessage | AnthropicAssistantMessage
 
-export type AnthropicTool = AnthropicFunctionTool | AnthropicWebSearchTool
-
-export interface AnthropicFunctionTool {
+export interface AnthropicTool {
   name: string
   description?: string
   input_schema: Record<string, unknown>
-}
-
-export interface AnthropicWebSearchTool {
-  type: "web_search_20250305"
-  name?: "web_search"
-  max_uses?: number
+  defer_loading?: boolean
+  cache_control?: AnthropicCacheControl | null
 }
 
 export interface AnthropicResponse {
@@ -205,7 +239,9 @@ export interface AnthropicStreamState {
   messageStartSent: boolean
   contentBlockIndex: number
   contentBlockOpen: boolean
-  currentContentBlockType?: "text" | "thinking" | "tool_use"
+  thinkingBlockOpen: boolean
+  pendingMessageDelta?: AnthropicMessageDeltaEvent
+  deferredContent?: string
   toolCalls: {
     [openAIToolIndex: number]: {
       id: string

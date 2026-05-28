@@ -1,113 +1,184 @@
 import type { Context } from "hono"
 
-import consola from "consola"
-import { events } from "fetch-event-stream"
-import { streamSSE } from "hono/streaming"
+import type { Model } from "~/services/copilot/get-models"
 
 import { awaitApproval } from "~/lib/approval"
+import { COMPACT_REQUEST } from "~/lib/compact"
+import {
+  getSmallModel,
+  isMessagesApiEnabled,
+  resolveMappedModel,
+} from "~/lib/config"
+import { createHandlerLogger, debugJson } from "~/lib/logger"
+import { findEndpointModel } from "~/lib/models"
+import { parseProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit } from "~/lib/rate-limit"
-import {
-  setRequestModel,
-  setResolvedModel,
-  setResponseModel,
-} from "~/lib/request-logger"
 import { state } from "~/lib/state"
-import {
-  createChatCompletions,
-  type ChatCompletionChunk,
-  type ChatCompletionResponse,
-} from "~/services/copilot/create-chat-completions"
+import { ensureCopilotBootstrapped } from "~/lib/token"
+import { generateRequestIdFromPayload, getRootSessionId } from "~/lib/utils"
+import { handleProviderMessagesForProvider } from "~/routes/provider/messages/handler"
+import { getResponsesTransportForModel } from "~/routes/responses/utils"
 
+import type { AnthropicMessagesPayload } from "./anthropic-types"
 import {
-  type AnthropicMessagesPayload,
-  type AnthropicStreamState,
-} from "./anthropic-types"
+  handleWithChatCompletions,
+  handleWithMessagesApi,
+  handleWithResponsesApi,
+} from "./api-flows"
 import {
-  translateToAnthropic,
-  translateToOpenAI,
-} from "./non-stream-translation"
-import { translateChunkToAnthropicEvents } from "./stream-translation"
+  applyLastMessageCacheControl,
+  getCompactType,
+  getLastMessageContentCacheControl,
+  mergeToolResultForClaude,
+  sanitizeIdeTools,
+  stripToolReferenceTurnBoundary,
+} from "./preprocess"
+import { parseSubagentMarkerFromFirstUser } from "./subagent-marker"
+
+const logger = createHandlerLogger("messages-handler")
+
+export const messagesFlowHandlers = {
+  handleWithChatCompletions,
+  handleWithMessagesApi,
+  handleWithResponsesApi,
+}
 
 export async function handleCompletion(c: Context) {
+  const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  const requestedModel = anthropicPayload.model
+  anthropicPayload.model = resolveMappedModel(anthropicPayload.model)
+  if (anthropicPayload.model !== requestedModel) {
+    logger.debug(
+      `Resolved model mapping: ${requestedModel} -> ${anthropicPayload.model}`,
+    )
+  }
+
+  const providerModelAlias = parseProviderModelAlias(anthropicPayload.model)
+  if (providerModelAlias) {
+    anthropicPayload.model = providerModelAlias.model
+    return await handleProviderMessagesForProvider(c, {
+      payload: anthropicPayload,
+      provider: providerModelAlias.provider,
+    })
+  }
+
+  await ensureCopilotBootstrapped({ loadModels: true })
   await checkRateLimit(state)
 
-  const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-  setRequestModel(c, anthropicPayload.model)
-  consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
-  consola.debug("Anthropic stream mode:", anthropicPayload.stream ?? false)
+  debugJson(logger, "Anthropic request payload:", anthropicPayload)
 
-  const openAIPayload = translateToOpenAI(anthropicPayload)
-  setResolvedModel(c, openAIPayload.model)
-  consola.debug(
-    "Translated OpenAI request payload:",
-    JSON.stringify(openAIPayload),
+  sanitizeIdeTools(anthropicPayload)
+
+  const subagentMarker = parseSubagentMarkerFromFirstUser(anthropicPayload)
+  if (subagentMarker) {
+    debugJson(logger, "Detected Subagent marker:", subagentMarker)
+  }
+
+  const sessionId = getRootSessionId(anthropicPayload, c)
+  logger.debug("Extracted session ID:", sessionId)
+
+  // claude code and opencode compact / auto-continue detection
+  const compactType = getCompactType(anthropicPayload)
+
+  // fix claude code 2.0.28+ warmup request consume premium request, forcing small model if no tools are used
+  // set "CLAUDE_CODE_SUBAGENT_MODEL": "you small model" also can avoid this
+  const anthropicBeta = c.req.header("anthropic-beta")
+  logger.debug("Anthropic Beta header:", anthropicBeta)
+  const noTools = !anthropicPayload.tools || anthropicPayload.tools.length === 0
+  if (anthropicBeta && noTools && compactType === 0) {
+    anthropicPayload.model = getSmallModel()
+  }
+
+  if (compactType) {
+    logger.debug("Compact request type:", compactType)
+  }
+
+  const lastMessageCacheControl = getLastMessageContentCacheControl(
+    anthropicPayload.messages.at(-1),
   )
+
+  stripToolReferenceTurnBoundary(anthropicPayload)
+
+  // Merge tool_result and text blocks into tool_result to avoid consuming premium requests
+  // (caused by skill invocations, edit hooks, plan or to do reminders)
+  // e.g. {"role":"user","content":[{"type":"tool_result","content":"Launching skill: xxx"},{"type":"text","text":"xxx"}]}
+  // not only for claude, but also for opencode
+  // compact requests still run this processing, except for the final compact message itself
+  mergeToolResultForClaude(anthropicPayload, {
+    skipLastMessage: compactType === COMPACT_REQUEST,
+  })
+
+  applyLastMessageCacheControl(anthropicPayload, lastMessageCacheControl)
+
+  const requestId = generateRequestIdFromPayload(anthropicPayload, sessionId)
+  logger.debug("Generated request ID:", requestId)
 
   if (state.manualApprove) {
     await awaitApproval()
   }
 
-  const response = await createChatCompletions(openAIPayload)
+  const selectedModel = findEndpointModel(anthropicPayload.model)
+  anthropicPayload.model = selectedModel?.id ?? anthropicPayload.model
 
-  if (isNonStreaming(response)) {
-    setResponseModel(c, response.model)
-    consola.debug(
-      "Non-streaming response from Copilot:",
-      JSON.stringify(response).slice(-400),
+  if (shouldUseMessagesApi(selectedModel)) {
+    return await messagesFlowHandlers.handleWithMessagesApi(
+      c,
+      anthropicPayload,
+      {
+        anthropicBetaHeader: anthropicBeta,
+        subagentMarker,
+        selectedModel,
+        requestId,
+        sessionId,
+        compactType,
+        logger,
+      },
     )
-    const anthropicResponse = translateToAnthropic(response)
-    consola.debug(
-      "Translated Anthropic response:",
-      JSON.stringify(anthropicResponse),
-    )
-    return c.json(anthropicResponse)
   }
 
-  consola.debug("Streaming response from Copilot")
-  c.header("Content-Type", "text/event-stream")
-  c.header("Cache-Control", "no-cache")
-  c.header("Connection", "keep-alive")
-  c.header("X-Accel-Buffering", "no")
-
-  return streamSSE(c, async (stream) => {
-    const streamState: AnthropicStreamState = {
-      messageStartSent: false,
-      contentBlockIndex: 0,
-      contentBlockOpen: false,
-      currentContentBlockType: undefined,
-      toolCalls: {},
-    }
-
-    const eventStream = events(
-      new Response(response, {
-        headers: { "Content-Type": "text/event-stream" },
-      }),
+  if (shouldUseResponsesApi(selectedModel, compactType)) {
+    return await messagesFlowHandlers.handleWithResponsesApi(
+      c,
+      anthropicPayload,
+      {
+        subagentMarker,
+        selectedModel,
+        requestId,
+        sessionId,
+        compactType,
+        logger,
+      },
     )
+  }
 
-    for await (const rawEvent of eventStream) {
-      consola.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
-      if (rawEvent.data === "[DONE]") {
-        break
-      }
-
-      if (!rawEvent.data) {
-        continue
-      }
-
-      const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
-      const events = translateChunkToAnthropicEvents(chunk, streamState)
-
-      for (const event of events) {
-        consola.debug("Translated Anthropic event:", JSON.stringify(event))
-        await stream.writeSSE({
-          event: event.type,
-          data: JSON.stringify(event),
-        })
-      }
-    }
-  })
+  return await messagesFlowHandlers.handleWithChatCompletions(
+    c,
+    anthropicPayload,
+    {
+      subagentMarker,
+      requestId,
+      sessionId,
+      compactType,
+      logger,
+    },
+  )
 }
 
-const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
+const MESSAGES_ENDPOINT = "/v1/messages"
+
+const shouldUseResponsesApi = (
+  selectedModel: Model | undefined,
+  compactType: ReturnType<typeof getCompactType>,
+): boolean => {
+  return Boolean(getResponsesTransportForModel(selectedModel, { compactType }))
+}
+
+const shouldUseMessagesApi = (selectedModel: Model | undefined): boolean => {
+  const useMessagesApi = isMessagesApiEnabled()
+  if (!useMessagesApi) {
+    return false
+  }
+  return (
+    selectedModel?.supported_endpoints?.includes(MESSAGES_ENDPOINT) ?? false
+  )
+}

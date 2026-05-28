@@ -6,13 +6,22 @@ import consola from "consola"
 import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
 
+import type { AppConfig } from "./lib/config"
+
+import { mergeConfigWithDefaults } from "./lib/config"
+import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
-import { setupCopilotToken, setupGitHubToken } from "./lib/token"
-import { cacheModels, cacheVSCodeVersion } from "./lib/utils"
-import { server } from "./server"
+import { logUser, setupCopilotToken, setupGitHubToken } from "./lib/token"
+import {
+  cacheMacMachineId,
+  cacheModels,
+  cacheVSCodeVersion,
+  cacheVsCodeSessionId,
+  cacheVsCodeDeviceId,
+} from "./lib/utils"
 
 interface RunServerOptions {
   port: number
@@ -27,11 +36,27 @@ interface RunServerOptions {
   proxyEnv: boolean
 }
 
+export function shouldBootstrapCopilotAtStartup(
+  config: AppConfig,
+  claudeCode: boolean,
+): boolean {
+  return claudeCode || config.eagerCopilotBootstrap !== false
+}
+
 export async function runServer(options: RunServerOptions): Promise<void> {
+  // Work around unjs/consola#357 until a release includes PR #359.
+  consola.options.throttle = 0
+
+  // Ensure config is merged with defaults at startup
+  const config = mergeConfigWithDefaults()
+
+  await initOpencodeVersion()
+
   if (options.proxyEnv) {
     initProxyFromEnv()
   }
 
+  state.verbose = options.verbose
   if (options.verbose) {
     consola.level = 5
     consola.info("Verbose logging enabled")
@@ -49,24 +74,40 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   await ensurePaths()
   await cacheVSCodeVersion()
+  cacheMacMachineId()
+  cacheVsCodeSessionId()
+  await cacheVsCodeDeviceId()
 
   if (options.githubToken) {
     state.githubToken = options.githubToken
     consola.info("Using provided GitHub token")
-  } else {
-    await setupGitHubToken()
   }
 
-  await setupCopilotToken()
-  await cacheModels()
+  if (shouldBootstrapCopilotAtStartup(config, options.claudeCode)) {
+    if (state.githubToken) {
+      await logUser()
+    } else {
+      await setupGitHubToken()
+    }
 
-  consola.info(
-    `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
-  )
+    await setupCopilotToken()
+    await cacheModels()
+
+    consola.info(
+      `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
+    )
+  } else {
+    consola.info("Skipping eager Copilot bootstrap at startup")
+  }
 
   const serverUrl = `http://localhost:${options.port}`
 
   if (options.claudeCode) {
+    consola.log(
+      "\n💡 Tip: The --claude-code flag simply generates a clipboard command for launching Claude Code. \n"
+        + "All models remain fully accessible without this flag, just configure the model ID directly in your settings.json file.",
+    )
+
     invariant(state.models, "Models should be loaded by now")
 
     const selectedModel = await consola.prompt(
@@ -91,10 +132,14 @@ export async function runServer(options: RunServerOptions): Promise<void> {
         ANTHROPIC_AUTH_TOKEN: "dummy",
         ANTHROPIC_MODEL: selectedModel,
         ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
-        ANTHROPIC_SMALL_FAST_MODEL: selectedSmallModel,
         ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedSmallModel,
         DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1",
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+        CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
+        CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
+        CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "true",
+        CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
+        CLAUDE_PLUGIN_ENABLE_QUESTION_RULES: "true",
       },
       "claude",
     )
@@ -110,12 +155,18 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     }
   }
 
-  consola.box(`Usage endpoint: ${serverUrl}/usage`)
+  consola.box(
+    `🌐 Usage Viewer: ${serverUrl}/usage-viewer?endpoint=${serverUrl}/usage`,
+  )
+
+  const { server } = await import("./server")
 
   serve({
     fetch: server.fetch as ServerHandler,
-    hostname: "127.0.0.1",
     port: options.port,
+    bun: {
+      idleTimeout: 0,
+    },
   })
 }
 

@@ -3,8 +3,12 @@ import { z } from "zod"
 
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 
-import { state } from "~/lib/state"
-import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
+import { COMPACT_REQUEST } from "../src/lib/compact"
+import {
+  RICH_TOOL_RESULT_MOVED_TEXT,
+  translateToOpenAI,
+} from "../src/routes/messages/non-stream-translation"
+import { getCompactType } from "../src/routes/messages/preprocess"
 
 // Zod schema for a single message in the chat completion request.
 const messageSchema = z.object({
@@ -32,7 +36,6 @@ const chatCompletionRequestSchema = z.object({
   logprobs: z.boolean().optional().nullable(),
   top_logprobs: z.number().int().min(0).max(20).optional().nullable(),
   max_tokens: z.number().int().optional().nullable(),
-  max_completion_tokens: z.number().int().optional().nullable(),
   n: z.number().int().min(1).max(128).optional().nullable(),
   presence_penalty: z.number().min(-2).max(2).optional().nullable(),
   response_format: z
@@ -64,79 +67,19 @@ function isValidChatCompletionRequest(payload: unknown): boolean {
   return result.success
 }
 
-describe("Anthropic to OpenAI model translation", () => {
-  test("should map dated Claude 3.5 Sonnet aliases to an available Copilot model", () => {
-    state.models = {
-      object: "list",
-      data: [
-        {
-          id: "claude-3.5-sonnet",
-          object: "model",
-          name: "Claude 3.5 Sonnet",
-          vendor: "anthropic",
-          version: "1",
-          preview: false,
-          model_picker_enabled: true,
-          capabilities: {
-            family: "claude",
-            limits: {},
-            object: "capabilities",
-            supports: {},
-            tokenizer: "mock",
-            type: "chat",
-          },
-        },
-      ],
-    }
+function getTextParts(
+  content: string | Array<{ type: string; text?: string }> | null | undefined,
+): Array<string> {
+  if (!Array.isArray(content)) {
+    return typeof content === "string" ? [content] : []
+  }
 
-    const anthropicPayload: AnthropicMessagesPayload = {
-      model: "claude-3-5-sonnet-20241022",
-      messages: [{ role: "user", content: "Hello!" }],
-      max_tokens: 0,
-    }
+  return content.flatMap((part) =>
+    part.type === "text" && typeof part.text === "string" ? [part.text] : [],
+  )
+}
 
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-
-    expect(openAIPayload.model).toBe("claude-3.5-sonnet")
-  })
-
-  test("should map Claude Sonnet minor-version aliases to a supported major model", () => {
-    state.models = {
-      object: "list",
-      data: [
-        {
-          id: "claude-sonnet-4",
-          object: "model",
-          name: "Claude Sonnet 4",
-          vendor: "anthropic",
-          version: "1",
-          preview: false,
-          model_picker_enabled: true,
-          capabilities: {
-            family: "claude",
-            limits: {},
-            object: "capabilities",
-            supports: {},
-            tokenizer: "mock",
-            type: "chat",
-          },
-        },
-      ],
-    }
-
-    const anthropicPayload: AnthropicMessagesPayload = {
-      model: "claude-sonnet-4-5",
-      messages: [{ role: "user", content: "Hello!" }],
-      max_tokens: 0,
-    }
-
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-
-    expect(openAIPayload.model).toBe("claude-sonnet-4")
-  })
-})
-
-describe("Anthropic to OpenAI payload translation", () => {
+describe("Anthropic to OpenAI translation logic", () => {
   test("should translate minimal Anthropic payload to valid OpenAI payload", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "gpt-4o",
@@ -146,8 +89,6 @@ describe("Anthropic to OpenAI payload translation", () => {
 
     const openAIPayload = translateToOpenAI(anthropicPayload)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
-    expect(openAIPayload.max_tokens).toBeUndefined()
-    expect(openAIPayload.max_completion_tokens).toBe(0)
   })
 
   test("should translate comprehensive Anthropic payload to valid OpenAI payload", () => {
@@ -177,8 +118,6 @@ describe("Anthropic to OpenAI payload translation", () => {
     }
     const openAIPayload = translateToOpenAI(anthropicPayload)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
-    expect(openAIPayload.max_tokens).toBeUndefined()
-    expect(openAIPayload.max_completion_tokens).toBe(150)
   })
 
   test("should handle missing fields gracefully", () => {
@@ -189,35 +128,6 @@ describe("Anthropic to OpenAI payload translation", () => {
     }
     const openAIPayload = translateToOpenAI(anthropicPayload)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
-    expect(openAIPayload.max_tokens).toBeUndefined()
-    expect(openAIPayload.max_completion_tokens).toBe(0)
-  })
-
-  test("should map max_tokens into max_completion_tokens", () => {
-    const anthropicPayload: AnthropicMessagesPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hello!" }],
-      max_tokens: 128,
-    }
-
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-
-    expect(openAIPayload.max_tokens).toBeUndefined()
-    expect(openAIPayload.max_completion_tokens).toBe(128)
-  })
-
-  test("should prefer max_tokens when both token fields are present", () => {
-    const anthropicPayload: AnthropicMessagesPayload = {
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hello!" }],
-      max_tokens: 128,
-      max_completion_tokens: 64,
-    }
-
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-
-    expect(openAIPayload.max_tokens).toBeUndefined()
-    expect(openAIPayload.max_completion_tokens).toBe(128)
   })
 
   test("should handle invalid types in Anthropic payload", () => {
@@ -231,9 +141,7 @@ describe("Anthropic to OpenAI payload translation", () => {
     // Should fail validation
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(false)
   })
-})
 
-describe("Anthropic thinking block translation", () => {
   test("should handle thinking blocks in assistant messages", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "claude-3-5-sonnet-20241022",
@@ -245,6 +153,7 @@ describe("Anthropic thinking block translation", () => {
             {
               type: "thinking",
               thinking: "Let me think about this simple math problem...",
+              signature: "abc123",
             },
             { type: "text", text: "2+2 equals 4." },
           ],
@@ -259,10 +168,10 @@ describe("Anthropic thinking block translation", () => {
     const assistantMessage = openAIPayload.messages.find(
       (m) => m.role === "assistant",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(assistantMessage?.reasoning_text).toContain(
       "Let me think about this simple math problem...",
     )
-    expect(assistantMessage?.content).toContain("2+2 equals 4.")
+    expect(getTextParts(assistantMessage?.content)).toContain("2+2 equals 4.")
   })
 
   test("should handle thinking blocks with tool calls", () => {
@@ -277,6 +186,7 @@ describe("Anthropic thinking block translation", () => {
               type: "thinking",
               thinking:
                 "I need to call the weather API to get current weather information.",
+              signature: "def456",
             },
             { type: "text", text: "I'll check the weather for you." },
             {
@@ -297,100 +207,530 @@ describe("Anthropic thinking block translation", () => {
     const assistantMessage = openAIPayload.messages.find(
       (m) => m.role === "assistant",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(assistantMessage?.reasoning_text).toContain(
       "I need to call the weather API",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(getTextParts(assistantMessage?.content)).toContain(
       "I'll check the weather for you.",
     )
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
   })
-})
 
-describe("Anthropic web search translation", () => {
-  test("should translate Anthropic web search tool to OpenAI web_search tool", () => {
+  test("should map tool_reference tool results into chat tool messages", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
-      model: "claude-sonnet-4.6",
+      model: "gpt-4o",
       messages: [
-        { role: "user", content: "Search the web for Bun release notes" },
-      ],
-      max_tokens: 128,
-      tools: [
         {
-          type: "web_search_20250305",
-        },
-      ],
-      tool_choice: { type: "tool", name: "web_search" },
-    }
-
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-
-    expect(openAIPayload.tools).toEqual([{ type: "web_search" }])
-    expect(openAIPayload.tool_choice).toEqual({ type: "web_search" })
-  })
-
-  test("should translate Anthropic any tool choice to hosted web_search when only web search tools exist", () => {
-    const anthropicPayload: AnthropicMessagesPayload = {
-      model: "claude-sonnet-4.6",
-      messages: [
-        { role: "user", content: "Search the web for Bun release notes" },
-      ],
-      max_tokens: 128,
-      tools: [
-        {
-          type: "web_search_20250305",
-        },
-      ],
-      tool_choice: { type: "any" },
-    }
-
-    const openAIPayload = translateToOpenAI(anthropicPayload)
-
-    expect(openAIPayload.tools).toEqual([{ type: "web_search" }])
-    expect(openAIPayload.tool_choice).toEqual({ type: "web_search" })
-  })
-
-  test("should not force hosted web_search when Anthropic web_search tool is absent", () => {
-    const anthropicPayload: AnthropicMessagesPayload = {
-      model: "claude-sonnet-4.6",
-      messages: [
-        { role: "user", content: "Search the web for Bun release notes" },
-      ],
-      max_tokens: 128,
-      tools: [
-        {
-          name: "lookup_docs",
-          description: "Look up docs",
-          input_schema: {
-            type: "object",
-            properties: {
-              query: { type: "string" },
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_123",
+              content: [
+                {
+                  type: "tool_reference",
+                  tool_name: "AskUserQuestion",
+                },
+              ],
             },
-          },
+          ],
         },
       ],
-      tool_choice: { type: "tool", name: "web_search" },
+      max_tokens: 100,
     }
 
     const openAIPayload = translateToOpenAI(anthropicPayload)
 
-    expect(openAIPayload.tools).toEqual([
+    expect(openAIPayload.messages).toEqual([
       {
-        type: "function",
-        function: {
-          name: "lookup_docs",
-          description: "Look up docs",
-          parameters: {
-            type: "object",
-            properties: {
-              query: { type: "string" },
-            },
+        role: "tool",
+        tool_call_id: "tool_123",
+        content: [
+          {
+            type: "text",
+            text: "Tool AskUserQuestion loaded",
           },
-        },
+        ],
       },
     ])
-    expect(openAIPayload.tool_choice).toBeUndefined()
+  })
+})
+
+describe("tool content support translation", () => {
+  test("keeps Copilot chat translation compatible with array and image tool results", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_image",
+              content: [
+                {
+                  type: "text",
+                  text: "screenshot",
+                },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "image-data",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "tool_image",
+        content: [
+          {
+            type: "text",
+            text: "screenshot",
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:image/png;base64,image-data",
+            },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("keeps Copilot image tool content while downgrading unsupported PDFs", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_pdf",
+              content: [
+                {
+                  type: "text",
+                  text: "screenshot",
+                },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "image-data",
+                  },
+                },
+                {
+                  type: "text",
+                  text: "PDF file read: report.pdf",
+                },
+                {
+                  type: "document",
+                  source: {
+                    type: "base64",
+                    media_type: "application/pdf",
+                    data: "pdf-data",
+                  },
+                  title: "report.pdf",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "tool_pdf",
+        content: [
+          {
+            type: "text",
+            text: "screenshot",
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:image/png;base64,image-data",
+            },
+          },
+          {
+            type: "text",
+            text: "PDF file read: report.pdf",
+          },
+          {
+            type: "text",
+            text: "PDF/document content is not supported by this Chat Completions upstream. Use the available text extracted from the document.",
+          },
+        ],
+      },
+    ])
+  })
+})
+
+describe("provider tool content support translation", () => {
+  test("uses string-only tool content when provider support is empty", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "qwen-plus",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_text",
+              content: [
+                {
+                  type: "text",
+                  text: "line one",
+                },
+                {
+                  type: "text",
+                  text: "line two",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload, {
+      toolContentSupportType: [],
+    })
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "tool_text",
+        content: "line one\nline two",
+      },
+    ])
+  })
+
+  test("rewrites provider image tool results when image support is not configured", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "qwen-plus",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_image",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/jpeg",
+                    data: "image-data",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload, {
+      toolContentSupportType: [],
+    })
+
+    expect(openAIPayload.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "tool_image",
+        content: RICH_TOOL_RESULT_MOVED_TEXT,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Tool result for tool_image:",
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: "data:image/jpeg;base64,image-data",
+            },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("keeps a matching tool message before moved rich tool content", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "qwen-plus",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_image",
+              name: "read_image",
+              input: { path: "screenshot.png" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_image",
+              content: [
+                {
+                  type: "text",
+                  text: "screenshot captured",
+                },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "image-data",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload, {
+      toolContentSupportType: [],
+    })
+
+    expect(openAIPayload.messages).toHaveLength(3)
+    expect(openAIPayload.messages[0]).toMatchObject({
+      role: "assistant",
+      tool_calls: [
+        {
+          id: "tool_image",
+          type: "function",
+          function: {
+            name: "read_image",
+            arguments: '{"path":"screenshot.png"}',
+          },
+        },
+      ],
+    })
+    expect(openAIPayload.messages[1]).toEqual({
+      role: "tool",
+      tool_call_id: "tool_image",
+      content: "screenshot captured",
+    })
+    expect(openAIPayload.messages[2]).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "Tool result for tool_image:",
+        },
+        {
+          type: "text",
+          text: "screenshot captured",
+        },
+        {
+          type: "image_url",
+          image_url: {
+            url: "data:image/png;base64,image-data",
+          },
+        },
+      ],
+    })
+  })
+})
+
+describe("provider tool result ordering", () => {
+  test("keeps all tool result messages contiguous before moved rich user content", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "qwen-plus",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_image",
+              name: "read_image",
+              input: { path: "screenshot.png" },
+            },
+            {
+              type: "tool_use",
+              id: "tool_text",
+              name: "read_text",
+              input: { path: "log.txt" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_image",
+              content: [
+                {
+                  type: "text",
+                  text: "screenshot captured",
+                },
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: "image/png",
+                    data: "image-data",
+                  },
+                },
+              ],
+            },
+            {
+              type: "tool_result",
+              tool_use_id: "tool_text",
+              content: [
+                {
+                  type: "text",
+                  text: "line one",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload, {
+      toolContentSupportType: [],
+    })
+
+    expect(openAIPayload.messages).toHaveLength(4)
+    expect(openAIPayload.messages[1]).toEqual({
+      role: "tool",
+      tool_call_id: "tool_image",
+      content: "screenshot captured",
+    })
+    expect(openAIPayload.messages[2]).toEqual({
+      role: "tool",
+      tool_call_id: "tool_text",
+      content: "line one",
+    })
+    expect(openAIPayload.messages[3]).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "Tool result for tool_image:",
+        },
+        {
+          type: "text",
+          text: "screenshot captured",
+        },
+        {
+          type: "image_url",
+          image_url: {
+            url: "data:image/png;base64,image-data",
+          },
+        },
+      ],
+    })
+  })
+})
+
+describe("compact request detection", () => {
+  test("detects current compact summary prompts in string content", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.\n\n7. Pending Tasks:\n   - [Task 1]\n\n8. Current Work:\n   [Current work]`,
+        },
+      ],
+      max_tokens: 1024,
+    }
+
+    expect(getCompactType(anthropicPayload)).toBe(COMPACT_REQUEST)
+  })
+
+  test("detects compact prompts in user text blocks while ignoring system reminders", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "<system-reminder>\nThe user opened a file.\n</system-reminder>",
+            },
+            {
+              type: "text",
+              text: `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.\n\n7. Pending Tasks:\n   - [Task 1]\n\n8. Current Work:\n   [Current work]`,
+            },
+          ],
+        },
+      ],
+      max_tokens: 1024,
+    }
+
+    expect(getCompactType(anthropicPayload)).toBe(COMPACT_REQUEST)
+  })
+
+  test("does not treat ordinary user quotes as compact prompts", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet",
+      messages: [
+        {
+          role: "user",
+          content:
+            'Please explain this prompt: "Your task is to create a detailed summary of the conversation so far"',
+        },
+      ],
+      max_tokens: 1024,
+    }
+
+    expect(getCompactType(anthropicPayload)).toBe(0)
+  })
+
+  test("keeps legacy system prompt compact detection", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet",
+      system:
+        "You are a helpful AI assistant tasked with summarizing conversations for future continuation.",
+      messages: [{ role: "user", content: "continue" }],
+      max_tokens: 1024,
+    }
+
+    expect(getCompactType(anthropicPayload)).toBe(COMPACT_REQUEST)
   })
 })
 

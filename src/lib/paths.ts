@@ -2,37 +2,31 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-const APP_NAME = "copilot-api"
+const AUTH_APP = process.env.COPILOT_API_OAUTH_APP?.trim() || ""
+const ENTERPRISE_PREFIX = process.env.COPILOT_API_ENTERPRISE_URL ? "ent_" : ""
 
-function getAppDir(): string {
-  if (process.platform === "win32") {
-    return path.join(
-      process.env.LOCALAPPDATA ?? process.env.APPDATA ?? os.homedir(),
-      APP_NAME,
-    )
-  }
+const DEFAULT_DIR = path.join(os.homedir(), ".local", "share", "copilot-api")
+const APP_DIR = process.env.COPILOT_API_HOME || DEFAULT_DIR
 
-  if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", APP_NAME)
-  }
-
-  return path.join(
-    process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share"),
-    APP_NAME,
-  )
-}
-
-const APP_DIR = getAppDir()
-const GITHUB_TOKEN_PATH = path.join(APP_DIR, "github_token")
+const GITHUB_TOKEN_PATH = path.join(
+  APP_DIR,
+  AUTH_APP,
+  ENTERPRISE_PREFIX + "github_token",
+)
+const CODEX_CREDENTIAL_PATH = path.join(APP_DIR, "codex_credentials.json")
+const CONFIG_PATH = path.join(APP_DIR, "config.json")
 
 export const PATHS = {
   APP_DIR,
   GITHUB_TOKEN_PATH,
+  CODEX_CREDENTIAL_PATH,
+  CONFIG_PATH,
 }
 
 export async function ensurePaths(): Promise<void> {
-  await fs.mkdir(PATHS.APP_DIR, { recursive: true })
+  await fs.mkdir(path.join(PATHS.APP_DIR, AUTH_APP), { recursive: true })
   await ensureFile(PATHS.GITHUB_TOKEN_PATH)
+  await ensureFile(PATHS.CONFIG_PATH)
 }
 
 async function ensureFile(filePath: string): Promise<void> {
@@ -40,9 +34,6 @@ async function ensureFile(filePath: string): Promise<void> {
     await fs.access(filePath, fs.constants.W_OK)
   } catch {
     await fs.writeFile(filePath, "")
-
-    if (process.platform !== "win32") {
-      await fs.chmod(filePath, 0o600)
-    }
+    await fs.chmod(filePath, 0o600)
   }
 }

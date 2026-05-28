@@ -37,7 +37,9 @@ const calculateToolCallsTokens = (
   let tokens = 0
   for (const toolCall of toolCalls) {
     tokens += constants.funcInit
-    tokens += encoder.encode(JSON.stringify(toolCall)).length
+    tokens += encoder.encode(toolCall.id).length
+    tokens += encoder.encode(toolCall.function.name).length
+    tokens += encoder.encode(toolCall.function.arguments).length
   }
   tokens += constants.funcEnd
   return tokens
@@ -54,6 +56,11 @@ const calculateContentPartsTokens = (
   for (const part of contentParts) {
     if (part.type === "image_url") {
       tokens += encoder.encode(part.image_url.url).length + 85
+    } else if (part.type === "file") {
+      tokens += encoder.encode(part.file.file_data).length
+      if (part.file.filename) {
+        tokens += encoder.encode(part.file.filename).length
+      }
     } else if (part.text) {
       tokens += encoder.encode(part.text).length
     }
@@ -73,6 +80,9 @@ const calculateMessageTokens = (
   const tokensPerName = 1
   let tokens = tokensPerMessage
   for (const [key, value] of Object.entries(message)) {
+    if (key === "reasoning_opaque") {
+      continue
+    }
     if (typeof value === "string") {
       tokens += encoder.encode(value).length
     }
@@ -158,6 +168,7 @@ const getModelConstants = (model: Model) => {
         enumInit: -3,
         enumItem: 3,
         funcEnd: 12,
+        isGpt: true,
       }
     : {
         funcInit: 7,
@@ -166,6 +177,7 @@ const getModelConstants = (model: Model) => {
         enumInit: -3,
         enumItem: 3,
         funcEnd: 12,
+        isGpt: model.id.startsWith("gpt-"),
       }
 }
 
@@ -218,8 +230,12 @@ const calculateParameterTokens = (
   const line = `${paramName}:${paramType}:${paramDesc}`
   tokens += encoder.encode(line).length
 
+  if (param.type === "array" && param["items"]) {
+    tokens += calculateParametersTokens(param["items"], encoder, constants)
+  }
+
   // Handle additional properties (excluding standard ones)
-  const excludedKeys = new Set(["type", "description", "enum"])
+  const excludedKeys = new Set(["type", "description", "enum", "items"])
   for (const propertyName of Object.keys(param)) {
     if (!excludedKeys.has(propertyName)) {
       const propertyValue = param[propertyName]
@@ -231,6 +247,27 @@ const calculateParameterTokens = (
     }
   }
 
+  return tokens
+}
+
+/**
+ * Calculate tokens for properties object
+ */
+const calculatePropertiesTokens = (
+  properties: Record<string, unknown>,
+  encoder: Encoder,
+  constants: ReturnType<typeof getModelConstants>,
+): number => {
+  let tokens = 0
+  if (Object.keys(properties).length > 0) {
+    tokens += constants.propInit
+    for (const propKey of Object.keys(properties)) {
+      tokens += calculateParameterTokens(propKey, properties[propKey], {
+        encoder,
+        constants,
+      })
+    }
+  }
   return tokens
 }
 
@@ -249,18 +286,17 @@ const calculateParametersTokens = (
   const params = parameters as Record<string, unknown>
   let tokens = 0
 
+  const excludedKeys = new Set(["$schema", "additionalProperties"])
   for (const [key, value] of Object.entries(params)) {
+    if (excludedKeys.has(key)) {
+      continue
+    }
     if (key === "properties") {
-      const properties = value as Record<string, unknown>
-      if (Object.keys(properties).length > 0) {
-        tokens += constants.propInit
-        for (const propKey of Object.keys(properties)) {
-          tokens += calculateParameterTokens(propKey, properties[propKey], {
-            encoder,
-            constants,
-          })
-        }
-      }
+      tokens += calculatePropertiesTokens(
+        value as Record<string, unknown>,
+        encoder,
+        constants,
+      )
     } else {
       const paramText =
         typeof value === "string" ? value : JSON.stringify(value)
@@ -279,10 +315,6 @@ const calculateToolTokens = (
   encoder: Encoder,
   constants: ReturnType<typeof getModelConstants>,
 ): number => {
-  if (tool.type !== "function") {
-    return encoder.encode(tool.type).length
-  }
-
   let tokens = constants.funcInit
   const func = tool.function
   const fName = func.name
@@ -292,7 +324,12 @@ const calculateToolTokens = (
   }
   const line = fName + ":" + fDesc
   tokens += encoder.encode(line).length
-  tokens += calculateParametersTokens(func.parameters, encoder, constants)
+  if (
+    typeof func.parameters === "object" // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    && func.parameters !== null
+  ) {
+    tokens += calculateParametersTokens(func.parameters, encoder, constants)
+  }
   return tokens
 }
 
@@ -305,10 +342,16 @@ export const numTokensForTools = (
   constants: ReturnType<typeof getModelConstants>,
 ): number => {
   let funcTokenCount = 0
-  for (const tool of tools) {
-    funcTokenCount += calculateToolTokens(tool, encoder, constants)
+  if (constants.isGpt) {
+    for (const tool of tools) {
+      funcTokenCount += calculateToolTokens(tool, encoder, constants)
+    }
+    funcTokenCount += constants.funcEnd
+  } else {
+    for (const tool of tools) {
+      funcTokenCount += encoder.encode(JSON.stringify(tool)).length
+    }
   }
-  funcTokenCount += constants.funcEnd
   return funcTokenCount
 }
 
@@ -334,6 +377,7 @@ export const getTokenCount = async (
   )
 
   const constants = getModelConstants(model)
+  // gpt count token https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
   let inputTokens = calculateTokens(inputMessages, encoder, constants)
   if (payload.tools && payload.tools.length > 0) {
     inputTokens += numTokensForTools(payload.tools, encoder, constants)

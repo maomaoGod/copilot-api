@@ -1,6 +1,6 @@
 @echo off
 echo ================================================
-echo Copilot API Server with Usage Viewer
+echo GitHub Copilot API Server with Usage Viewer
 echo ================================================
 echo.
 
@@ -11,10 +11,10 @@ if not exist node_modules (
 )
 
 echo Starting server...
-echo The usage endpoint will be available after the server starts
+echo The usage viewer page will open automatically after the server starts
 echo.
 
-echo http://localhost:4141/usage
-bun run --watch ./src/main.ts start
+start "" "http://localhost:4141/usage-viewer?endpoint=http://localhost:4141/usage"
+bun run dev
 
 pause
