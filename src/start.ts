@@ -14,10 +14,14 @@ import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
-import { logUser, setupCopilotToken, setupGitHubToken } from "./lib/token"
+import {
+  logUser as logConfiguredUser,
+  setupCopilotToken as setupConfiguredCopilotToken,
+  setupGitHubToken as setupConfiguredGitHubToken,
+} from "./lib/token"
 import {
   cacheMacMachineId,
-  cacheModels,
+  cacheModels as cacheConfiguredModels,
   cacheVSCodeVersion,
   cacheVsCodeSessionId,
   cacheVsCodeDeviceId,
@@ -36,6 +40,22 @@ interface RunServerOptions {
   proxyEnv: boolean
 }
 
+export const startDependencies = {
+  cacheMacMachineId,
+  cacheModels: cacheConfiguredModels,
+  cacheVSCodeVersion,
+  cacheVsCodeDeviceId,
+  cacheVsCodeSessionId,
+  ensurePaths,
+  initOpencodeVersion,
+  loadServer: () => import("./server"),
+  logUser: logConfiguredUser,
+  mergeConfigWithDefaults,
+  serve,
+  setupCopilotToken: setupConfiguredCopilotToken,
+  setupGitHubToken: setupConfiguredGitHubToken,
+}
+
 export function shouldBootstrapCopilotAtStartup(
   config: AppConfig,
   claudeCode: boolean,
@@ -48,9 +68,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   consola.options.throttle = 0
 
   // Ensure config is merged with defaults at startup
-  const config = mergeConfigWithDefaults()
+  const config = startDependencies.mergeConfigWithDefaults()
 
-  await initOpencodeVersion()
+  await startDependencies.initOpencodeVersion()
 
   if (options.proxyEnv) {
     initProxyFromEnv()
@@ -72,11 +92,11 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
 
-  await ensurePaths()
-  await cacheVSCodeVersion()
-  cacheMacMachineId()
-  cacheVsCodeSessionId()
-  await cacheVsCodeDeviceId()
+  await startDependencies.ensurePaths()
+  await startDependencies.cacheVSCodeVersion()
+  startDependencies.cacheMacMachineId()
+  startDependencies.cacheVsCodeSessionId()
+  await startDependencies.cacheVsCodeDeviceId()
 
   if (options.githubToken) {
     state.githubToken = options.githubToken
@@ -85,13 +105,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   if (shouldBootstrapCopilotAtStartup(config, options.claudeCode)) {
     if (state.githubToken) {
-      await logUser()
+      await startDependencies.logUser()
     } else {
-      await setupGitHubToken()
+      await startDependencies.setupGitHubToken()
     }
 
-    await setupCopilotToken()
-    await cacheModels()
+    await startDependencies.setupCopilotToken()
+    await startDependencies.cacheModels()
 
     consola.info(
       `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
@@ -159,9 +179,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `🌐 Usage Viewer: ${serverUrl}/usage-viewer?endpoint=${serverUrl}/usage`,
   )
 
-  const { server } = await import("./server")
+  const { server } = await startDependencies.loadServer()
 
-  serve({
+  startDependencies.serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
     bun: {

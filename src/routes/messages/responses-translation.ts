@@ -14,7 +14,7 @@ import {
 import { HTTPError } from "~/lib/error"
 import {
   getExtraPromptForModel,
-  getReasoningEffortForModel,
+  getReasoningEffortForModel as getConfiguredReasoningEffortForModel,
 } from "~/lib/config"
 import { requestContext } from "~/lib/request-context"
 import { parseUserIdMetadata } from "~/lib/utils"
@@ -71,6 +71,10 @@ const COMPACTION_SIGNATURE_PREFIX = "cm1#"
 const COMPACTION_SIGNATURE_SEPARATOR = "@"
 
 export const THINKING_TEXT = "Thinking..."
+
+export const responsesTranslationDependencies = {
+  getReasoningEffortForModel: getConfiguredReasoningEffortForModel,
+}
 
 const buildPromptCacheKey = (
   basePromptCacheKey: string | null,
@@ -149,7 +153,9 @@ export const translateAnthropicMessagesToResponsesPayload = (
     store: false,
     parallel_tool_calls: true,
     reasoning: {
-      effort: getReasoningEffortForModel(payload.model),
+      effort: responsesTranslationDependencies.getReasoningEffortForModel(
+        payload.model,
+      ),
       summary: "detailed",
     },
     include: ["reasoning.encrypted_content"],

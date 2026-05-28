@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import type { AnthropicMessagesPayload } from "../src/routes/messages/anthropic-types"
 
@@ -6,10 +6,26 @@ import {
   applyLastMessageCacheControl,
   getLastMessageContentCacheControl,
   mergeToolResultForClaude,
+  messagesPreprocessDependencies,
   prepareMessagesApiPayload,
   sanitizeIdeTools,
   stripToolReferenceTurnBoundary,
 } from "../src/routes/messages/preprocess"
+
+const defaultMessagesPreprocessDependencies = {
+  ...messagesPreprocessDependencies,
+}
+
+beforeEach(() => {
+  messagesPreprocessDependencies.getReasoningEffortForModel = () => "xhigh"
+})
+
+afterEach(() => {
+  Object.assign(
+    messagesPreprocessDependencies,
+    defaultMessagesPreprocessDependencies,
+  )
+})
 
 describe("mergeToolResultForClaude", () => {
   test("removes tool reference turn boundaries before merging", () => {

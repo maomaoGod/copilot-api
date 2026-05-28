@@ -4,9 +4,9 @@ import { streamSSE, type SSEMessage } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
 import { createHandlerLogger, debugJson, debugJsonTail } from "~/lib/logger"
-import { checkRateLimit } from "~/lib/rate-limit"
+import { checkRateLimit as checkConfiguredRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
-import { ensureCopilotBootstrapped } from "~/lib/token"
+import { ensureCopilotBootstrapped as ensureConfiguredCopilotBootstrapped } from "~/lib/token"
 import {
   createCopilotTokenUsageRecorder,
   normalizeOpenAIUsage,
@@ -21,6 +21,11 @@ import {
 } from "~/services/copilot/create-chat-completions"
 
 const logger = createHandlerLogger("chat-completions-handler")
+
+export const chatCompletionsHandlerDependencies = {
+  checkRateLimit: checkConfiguredRateLimit,
+  ensureCopilotBootstrapped: ensureConfiguredCopilotBootstrapped,
+}
 
 export async function handleCompletion(c: Context) {
   let payload = await c.req.json<ChatCompletionsPayload>()
@@ -38,8 +43,10 @@ export async function handleCompletion(c: Context) {
     )
   }
 
-  await ensureCopilotBootstrapped({ loadModels: true })
-  await checkRateLimit(state)
+  await chatCompletionsHandlerDependencies.ensureCopilotBootstrapped({
+    loadModels: true,
+  })
+  await chatCompletionsHandlerDependencies.checkRateLimit(state)
 
   // Find the selected model
   const selectedModel = state.models?.data.find(

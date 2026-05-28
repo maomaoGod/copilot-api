@@ -3,8 +3,6 @@ import { Hono } from "hono"
 
 import type { createResponses as createCopilotResponses } from "../src/services/copilot/create-responses"
 
-const actualTokenModule = await import("../src/lib/token")
-
 let responsesApiWebSocketEnabled = true
 
 const createResponses = mock((() =>
@@ -30,11 +28,6 @@ const createResponsesResult = (model: string) => ({
   top_p: null,
   usage: null,
 })
-
-await mock.module("~/lib/token", () => ({
-  ...actualTokenModule,
-  ensureCopilotBootstrapped,
-}))
 
 const { state } = await import("../src/lib/state")
 const { closeUsageStore } = await import("../src/lib/token-usage")
@@ -110,6 +103,8 @@ beforeEach(async () => {
   ensureCopilotBootstrapped.mockClear()
   responsesHandlerDependencies.checkRateLimit = async () => {}
   responsesHandlerDependencies.createResponses = createResponses
+  responsesHandlerDependencies.ensureCopilotBootstrapped =
+    ensureCopilotBootstrapped
   responsesHandlerDependencies.isResponsesApiWebSearchEnabled = () => true
   responsesUtilsDependencies.isResponsesApiContextManagementModel = () => false
   responsesUtilsDependencies.isResponsesApiWebSocketEnabled = () =>

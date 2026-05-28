@@ -10,7 +10,7 @@ import {
   compactTextOnlyGuard,
   type CompactType,
 } from "~/lib/compact"
-import { getReasoningEffortForModel } from "~/lib/config"
+import { getReasoningEffortForModel as getConfiguredReasoningEffortForModel } from "~/lib/config"
 
 import type {
   AnthropicAssistantContentBlock,
@@ -32,6 +32,10 @@ const IDE_GET_DIAGNOSTICS_TOOL = "mcp__ide__getDiagnostics"
 const IDE_GET_DIAGNOSTICS_DESCRIPTION =
   "Get language diagnostics from VS Code. Returns errors, warnings, information, and hints for files in the workspace."
 const PDF_FILE_READ_PREFIX = "PDF file read:"
+
+export const messagesPreprocessDependencies = {
+  getReasoningEffortForModel: getConfiguredReasoningEffortForModel,
+}
 
 type AnthropicAttachmentBlock = AnthropicImageBlock | AnthropicDocumentBlock
 type AnthropicMessageContentBlock =
@@ -617,7 +621,9 @@ export const prepareMessagesApiPayload = (
     if (payload.model === "claude-opus-4.7") {
       payload.thinking.display = "summarized"
     }
-    let effort = getReasoningEffortForModel(payload.model)
+    let effort = messagesPreprocessDependencies.getReasoningEffortForModel(
+      payload.model,
+    )
     if (effort === "none" || effort === "minimal") {
       effort = "low"
     }

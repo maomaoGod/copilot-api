@@ -9,7 +9,7 @@ import { parseProviderModelAlias } from "~/lib/provider-model"
 import { checkRateLimit as checkConfiguredRateLimit } from "~/lib/rate-limit"
 import { handleProviderResponsesForProvider } from "~/routes/provider/responses/handler"
 import { state } from "~/lib/state"
-import { ensureCopilotBootstrapped } from "~/lib/token"
+import { ensureCopilotBootstrapped as ensureConfiguredCopilotBootstrapped } from "~/lib/token"
 import {
   createCopilotTokenUsageRecorder,
   normalizeResponsesUsage,
@@ -36,6 +36,7 @@ const logger = createHandlerLogger("responses-handler")
 export const responsesHandlerDependencies = {
   checkRateLimit: checkConfiguredRateLimit,
   createResponses: createCopilotResponses,
+  ensureCopilotBootstrapped: ensureConfiguredCopilotBootstrapped,
   isResponsesApiWebSearchEnabled: isConfiguredResponsesApiWebSearchEnabled,
 }
 
@@ -52,7 +53,9 @@ export const handleResponses = async (c: Context) => {
   }
 
   debugJson(logger, "Responses request payload:", payload)
-  await ensureCopilotBootstrapped({ loadModels: true })
+  await responsesHandlerDependencies.ensureCopilotBootstrapped({
+    loadModels: true,
+  })
   await responsesHandlerDependencies.checkRateLimit(state)
 
   // not support subagent marker for now , set sessionId = getUUID(requestId)

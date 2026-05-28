@@ -1,10 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
-
-const actualConfigModule = await import("../src/lib/config")
-const actualOpencodeModule = await import("../src/lib/opencode")
-const actualPathsModule = await import("../src/lib/paths")
-const actualUtilsModule = await import("../src/lib/utils")
-const actualTokenModule = await import("../src/lib/token")
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 
 const mergeConfigWithDefaults = mock(() => ({ eagerCopilotBootstrap: false }))
 const initOpencodeVersion = mock(() => Promise.resolve())
@@ -17,49 +11,56 @@ const setupGitHubToken = mock(() => Promise.resolve())
 const logUser = mock(() => Promise.resolve())
 const setupCopilotToken = mock(() => Promise.resolve())
 const cacheModels = mock(() => Promise.resolve())
-const serve = mock(() => {})
-
-await mock.module("../src/lib/config", () => ({
-  ...actualConfigModule,
-  mergeConfigWithDefaults,
-}))
-await mock.module("../src/lib/opencode", () => ({
-  ...actualOpencodeModule,
-  initOpencodeVersion,
-}))
-await mock.module("../src/lib/paths", () => ({
-  ...actualPathsModule,
-  ensurePaths,
-}))
-await mock.module("../src/lib/utils", () => ({
-  ...actualUtilsModule,
-  cacheVSCodeVersion,
-  cacheMacMachineId,
-  cacheVsCodeSessionId,
-  cacheVsCodeDeviceId,
-  cacheModels,
-}))
-await mock.module("../src/lib/token", () => ({
-  ...actualTokenModule,
-  setupGitHubToken,
-  logUser,
-  setupCopilotToken,
-}))
-await mock.module("../src/server", () => ({
-  server: {
-    fetch: mock(() => new Response("ok")),
-  },
-}))
-await mock.module("srvx", () => ({
-  serve,
-}))
-
-const { runServer, shouldBootstrapCopilotAtStartup } = await import(
-  "../src/start"
+const serve = mock(
+  () => undefined as unknown as ReturnType<typeof startDependencies.serve>,
 )
+
+const { runServer, shouldBootstrapCopilotAtStartup, startDependencies } =
+  await import("../src/start")
+const { state } = await import("../src/lib/state")
+
+const createLoadServerResult = () => {
+  return {
+    server: {
+      fetch: mock(() => new Response("ok")),
+    },
+  } as unknown as Awaited<ReturnType<typeof startDependencies.loadServer>>
+}
+
+const loadServer = mock(() => Promise.resolve(createLoadServerResult()))
+
+const defaultStartDependencies = { ...startDependencies }
+
+const createStateSnapshot = () => ({
+  accountType: state.accountType,
+  githubToken: state.githubToken,
+  manualApprove: state.manualApprove,
+  rateLimitSeconds: state.rateLimitSeconds,
+  rateLimitWait: state.rateLimitWait,
+  showToken: state.showToken,
+  verbose: state.verbose,
+})
+
+let stateSnapshot = createStateSnapshot()
 
 describe("startup bootstrap behavior", () => {
   beforeEach(() => {
+    stateSnapshot = createStateSnapshot()
+
+    startDependencies.mergeConfigWithDefaults = mergeConfigWithDefaults
+    startDependencies.initOpencodeVersion = initOpencodeVersion
+    startDependencies.ensurePaths = ensurePaths
+    startDependencies.cacheVSCodeVersion = cacheVSCodeVersion
+    startDependencies.cacheMacMachineId = cacheMacMachineId
+    startDependencies.cacheVsCodeSessionId = cacheVsCodeSessionId
+    startDependencies.cacheVsCodeDeviceId = cacheVsCodeDeviceId
+    startDependencies.setupGitHubToken = setupGitHubToken
+    startDependencies.loadServer = loadServer
+    startDependencies.logUser = logUser
+    startDependencies.serve = serve
+    startDependencies.setupCopilotToken = setupCopilotToken
+    startDependencies.cacheModels = cacheModels
+
     mergeConfigWithDefaults.mockReset()
     mergeConfigWithDefaults.mockImplementation(() => ({
       eagerCopilotBootstrap: false,
@@ -77,7 +78,16 @@ describe("startup bootstrap behavior", () => {
     setupCopilotToken.mockImplementation(() => Promise.resolve())
     cacheModels.mockReset()
     cacheModels.mockImplementation(() => Promise.resolve())
+    loadServer.mockReset()
+    loadServer.mockImplementation(() =>
+      Promise.resolve(createLoadServerResult()),
+    )
     serve.mockClear()
+  })
+
+  afterEach(() => {
+    Object.assign(startDependencies, defaultStartDependencies)
+    Object.assign(state, stateSnapshot)
   })
 
   test("skips Copilot bootstrap when eagerCopilotBootstrap is disabled", async () => {

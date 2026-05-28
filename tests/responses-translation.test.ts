@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { requestContext } from "~/lib/request-context"
 import { createMcpToolSearchSentinel } from "~/lib/tool-search"
@@ -12,9 +12,25 @@ import type {
 } from "~/services/copilot/create-responses"
 
 import {
+  responsesTranslationDependencies,
   translateAnthropicMessagesToResponsesPayload,
   translateResponsesResultToAnthropic,
 } from "~/routes/messages/responses-translation"
+
+const defaultResponsesTranslationDependencies = {
+  ...responsesTranslationDependencies,
+}
+
+beforeEach(() => {
+  responsesTranslationDependencies.getReasoningEffortForModel = () => "high"
+})
+
+afterEach(() => {
+  Object.assign(
+    responsesTranslationDependencies,
+    defaultResponsesTranslationDependencies,
+  )
+})
 
 const samplePayload = {
   model: "claude-3-5-sonnet",

@@ -63,11 +63,17 @@ const {
   messagesApiFlowDependencies,
   prepareCopilotChatCompletionsPayload,
 } = await import("../src/routes/messages/api-flows")
+const { responsesTranslationDependencies } = await import(
+  "../src/routes/messages/responses-translation"
+)
 const { responsesUtilsDependencies } = await import(
   "../src/routes/responses/utils"
 )
 
 const defaultMessagesApiFlowDependencies = { ...messagesApiFlowDependencies }
+const defaultResponsesTranslationDependencies = {
+  ...responsesTranslationDependencies,
+}
 const defaultResponsesUtilsDependencies = { ...responsesUtilsDependencies }
 
 const logger = {
@@ -88,6 +94,8 @@ beforeEach(() => {
   responsesApiWebSocketEnabled = true
   messagesApiFlowDependencies.createChatCompletions = createChatCompletions
   messagesApiFlowDependencies.createResponses = createResponses
+  responsesTranslationDependencies.getReasoningEffortForModel = () => "high"
+  responsesUtilsDependencies.isResponsesApiContextManagementModel = () => false
   responsesUtilsDependencies.isResponsesApiWebSocketEnabled = () =>
     responsesApiWebSocketEnabled
   createChatCompletions.mockClear()
@@ -96,6 +104,10 @@ beforeEach(() => {
 
 afterEach(() => {
   Object.assign(messagesApiFlowDependencies, defaultMessagesApiFlowDependencies)
+  Object.assign(
+    responsesTranslationDependencies,
+    defaultResponsesTranslationDependencies,
+  )
   Object.assign(responsesUtilsDependencies, defaultResponsesUtilsDependencies)
 })
 

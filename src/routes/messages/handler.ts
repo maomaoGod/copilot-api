@@ -12,9 +12,9 @@ import {
 import { createHandlerLogger, debugJson } from "~/lib/logger"
 import { findEndpointModel } from "~/lib/models"
 import { parseProviderModelAlias } from "~/lib/provider-model"
-import { checkRateLimit } from "~/lib/rate-limit"
+import { checkRateLimit as checkConfiguredRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
-import { ensureCopilotBootstrapped } from "~/lib/token"
+import { ensureCopilotBootstrapped as ensureConfiguredCopilotBootstrapped } from "~/lib/token"
 import { generateRequestIdFromPayload, getRootSessionId } from "~/lib/utils"
 import { handleProviderMessagesForProvider } from "~/routes/provider/messages/handler"
 import { getResponsesTransportForModel } from "~/routes/responses/utils"
@@ -43,6 +43,11 @@ export const messagesFlowHandlers = {
   handleWithResponsesApi,
 }
 
+export const messagesHandlerDependencies = {
+  checkRateLimit: checkConfiguredRateLimit,
+  ensureCopilotBootstrapped: ensureConfiguredCopilotBootstrapped,
+}
+
 export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   const requestedModel = anthropicPayload.model
@@ -62,8 +67,10 @@ export async function handleCompletion(c: Context) {
     })
   }
 
-  await ensureCopilotBootstrapped({ loadModels: true })
-  await checkRateLimit(state)
+  await messagesHandlerDependencies.ensureCopilotBootstrapped({
+    loadModels: true,
+  })
+  await messagesHandlerDependencies.checkRateLimit(state)
 
   debugJson(logger, "Anthropic request payload:", anthropicPayload)
 

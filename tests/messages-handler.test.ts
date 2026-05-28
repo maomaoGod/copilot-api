@@ -12,7 +12,6 @@ const actualStateModule = await import("../src/lib/state")
 const actualConfigModule = await import("../src/lib/config")
 const actualModelsModule = await import("../src/lib/models")
 const actualRateLimitModule = await import("../src/lib/rate-limit")
-const actualTokenModule = await import("../src/lib/token")
 const actualUtilsModule = await import("../src/lib/utils")
 
 const state = {
@@ -71,10 +70,6 @@ await mock.module("~/lib/rate-limit", () => ({
   ...actualRateLimitModule,
   checkRateLimit,
 }))
-await mock.module("~/lib/token", () => ({
-  ...actualTokenModule,
-  ensureCopilotBootstrapped,
-}))
 await mock.module("~/lib/config", () => ({
   ...actualConfigModule,
   getSmallModel: () => "small-model",
@@ -89,14 +84,14 @@ await mock.module("~/lib/models", () => ({
 await mock.module("~/lib/utils", () => ({
   ...actualUtilsModule,
 }))
-const { handleCompletion, messagesFlowHandlers } = await import(
-  "../src/routes/messages/handler"
-)
+const { handleCompletion, messagesFlowHandlers, messagesHandlerDependencies } =
+  await import("../src/routes/messages/handler")
 const { responsesUtilsDependencies } = await import(
   "../src/routes/responses/utils"
 )
 
 const defaultMessagesFlowHandlers = { ...messagesFlowHandlers }
+const defaultMessagesHandlerDependencies = { ...messagesHandlerDependencies }
 const defaultResponsesUtilsDependencies = { ...responsesUtilsDependencies }
 
 const createApp = () => {
@@ -124,6 +119,9 @@ beforeEach(() => {
   messagesFlowHandlers.handleWithMessagesApi = handleWithMessagesApi
   messagesFlowHandlers.handleWithResponsesApi = handleWithResponsesApi
   messagesFlowHandlers.handleWithChatCompletions = handleWithChatCompletions
+  messagesHandlerDependencies.checkRateLimit = checkRateLimit
+  messagesHandlerDependencies.ensureCopilotBootstrapped =
+    ensureCopilotBootstrapped
   responsesUtilsDependencies.isResponsesApiContextManagementModel = () => false
   responsesUtilsDependencies.isResponsesApiWebSocketEnabled = () => true
 
@@ -142,6 +140,7 @@ afterEach(() => {
     defaultMessagesFlowHandlers.handleWithResponsesApi
   messagesFlowHandlers.handleWithChatCompletions =
     defaultMessagesFlowHandlers.handleWithChatCompletions
+  Object.assign(messagesHandlerDependencies, defaultMessagesHandlerDependencies)
   Object.assign(responsesUtilsDependencies, defaultResponsesUtilsDependencies)
 })
 

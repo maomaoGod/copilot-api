@@ -1,18 +1,16 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { Hono } from "hono"
 
-const actualTokenModule = await import("../src/lib/token")
 const ensureCopilotBootstrapped = mock(async () => {})
 
-await mock.module("~/lib/token", () => ({
-  ...actualTokenModule,
-  ensureCopilotBootstrapped,
-}))
-
 import { state } from "../src/lib/state"
+import { chatCompletionsHandlerDependencies } from "../src/routes/chat-completions/handler"
 import { completionRoutes } from "../src/routes/chat-completions/route"
 
 const originalFetch = globalThis.fetch
+const defaultChatCompletionsHandlerDependencies = {
+  ...chatCompletionsHandlerDependencies,
+}
 const originalState = {
   accountType: state.accountType,
   copilotToken: state.copilotToken,
@@ -75,6 +73,10 @@ const createApp = () => {
 }
 
 beforeEach(() => {
+  chatCompletionsHandlerDependencies.ensureCopilotBootstrapped =
+    ensureCopilotBootstrapped
+  chatCompletionsHandlerDependencies.checkRateLimit = async () => {}
+
   state.accountType = "individual"
   state.copilotToken = "test-token"
   state.manualApprove = false
@@ -92,6 +94,11 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  Object.assign(
+    chatCompletionsHandlerDependencies,
+    defaultChatCompletionsHandlerDependencies,
+  )
+
   state.accountType = originalState.accountType
   state.copilotToken = originalState.copilotToken
   state.manualApprove = originalState.manualApprove
